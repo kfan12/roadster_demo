@@ -147,9 +147,209 @@ private:
     // WARNING/BRAKING (do not trigger from one noisy frame); clear_count_
     // gates EXIT back toward MONITORING (do not release the instant a cluster
     // flickers out for a frame - "use hold time and release hysteresis").
+    void step_state(bool risk_now, bool warn_now, double v)
+    {
+        bool any_concern = risk_now || warn_now;
+        persist_count_ = any_concern ? persist_count_ + 1 : 0;
+        clear_count_ = any_concern ? 0 : clear_count_ + 1;
+
+        switch (state_)
+        {
+        case AebState::INACTIVE:
+
+        case AebState::FAULT:
+            state_ = AebState::MONITORING;
+            break;
+
+        case AebState::MONITORING:
+            if (risk_now && persist_count_ >= persistence_ticks_)
+                state_ = AebState::BRAKING;
+            else if (warn_now && persist_count_ >= persistence_ticks_)
+                state_ = AebState::WARNING;
+            break;
+
+        case AebState::WARNING:
+            if (risk_now && persist_count_ >= persistence_ticks_)
+                state_ = AebState::BRAKING;
+            else if (seconds_clear() >= clear_hysteresis_)
+                state_ = AebState::MONITORING;
+            break;
+
+        case AebState::BRAKING:
+            if (v < stop_hold_speed_)
+                state_ = AebState::STOP_HOLD;
+            // else: stays BRAKING. Release is only ever via STOP_HOLD's own
+            // timer below - never directly back to MONITORING while still
+            // moving ("do not automatically release AEB while the vehicle is
+            // still moving quickly").
+            break;
+
+        case AebState::STOP_HOLD:
+            if (seconds_clear() > collision_hold_)
+                state_ = AebState::MONITORING;
+            break;
+        }
+    }
+
+    void publish_fault(const std::string &reason)
+    {
+        state_ = AebState::FAULT;
+        AebStatus st;
+        st.header.stamp = now();
+        st.state = AebStatus::FAULT;
+        st.emergency_active = false;
+        st.reason = reason;
+        pub_status_->publish(st);
+        pub_cmd_->publish(geometry_msgs::msg::Twist{}); // zero cmd on fault
+    }
 
     void tick()
     {
+        if (!odom_ || !depth_)
+        {
+            publish_fault("waiting for odom and depth");
+            return;
+        }
+        if ((now() - odom_t_).seconds() > odom_stale_)
+        {
+            publish_fault("stale odom");
+            return;
+        }
+        if ((now() - depth_t_).seconds() > depth_stale_)
+        {
+            publish_fault("stale depth");
+            return;
+        }
+
+        double v = std::hypot(odom_->twist.twist.linear.x, odom_->twist.twist.linear.y);
+        double yaw_rate = odom_->twist.twist.angular.z;
+
+        auto clusters = av::safety::extract_clusters(depth_, pin_, T_base_cam_, fp_);
+
+        // Path A: MPC prediction, transformed odom -> base_link using THIS
+        // tick's ego pose (good enough at AEB's few-metre, sub-second
+        // horizon; the predicted path itself is only ~N*dt seconds old).
+
+        av::geom::Polyline mpc_path_base;
+        if (mpc_path_ && (now() - mpc_path_t_).seconds() < mpc_path_timeout_)
+        {
+            const auto &q = odom_->pose.pose.orientation;
+            av::proj::Pose2d ego_pose{
+                odom_->pose.pose.position.x,
+                odom_->pose.pose.position.y,
+                std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))};
+
+            for (const auto &pose_stamped : mpc_path_->poses)
+            {
+                const auto &p = pose_stamped.pose.position;
+                Eigen::Vector2d p_base = ego_pose.base_of({p.x, p.y});
+                mpc_path_base.push_back(p_base);
+            }
+        }
+
+        // Path B: independent kinematic prediction - always available, never
+        // depends on the MPC being healthy.
+        auto kin_path = av::safety::kinematic_prediction(v, yaw_rate, pred_t_, pred_dt_);
+
+        av::safety::CorridorResult best;
+        for (const auto *path : {&mpc_path_base, &kin_path})
+        {
+            if (path->size() < 2)
+                continue;
+            auto result = av::safety::check_corridor(*path, clusters, foot_);
+            if (result.obstacle_in_corridor && result.nearest_distance_m < best.nearest_distance_m)
+                best = result;
+        }
+
+        double ttc = best.obstacle_in_corridor
+                         ? av::safety::time_to_collision(best.nearest_distance_m, v)
+                         : 1e9;
+
+        double d_safe = av::safety::safe_braking_distance(v, t_response_, a_decel_, d_offset_);
+
+        bool risk_now = best.obstacle_in_corridor && ttc < brake_ttc_ && best.nearest_distance_m < d_safe;
+        bool warn_now = best.obstacle_in_corridor && (ttc < warning_ttc_ || best.nearest_distance_m < d_safe * 1.5);
+
+        step_state(risk_now, warn_now, v);
+
+        AebStatus st;
+        st.header.stamp = now();
+        st.state = static_cast<uint8_t>(state_);
+        st.emergency_active = (state_ == AebState::BRAKING || state_ == AebState::STOP_HOLD);
+        st.obstacle_distance_m = best.obstacle_in_corridor ? best.nearest_distance_m : -1.0;
+        st.relative_speed_mps = v;
+        st.time_to_collision_sec = std::min(ttc, 1e9);
+        st.safe_braking_distance_m = d_safe;
+        st.requested_deceleration_mps2 = (state_ == AebState::BRAKING || state_ == AebState::STOP_HOLD) ? a_decel_ : 0.0;
+        // per-frame cluster index, not a tracked identity - it can change every tick
+        st.obstacle_id = best.obstacle_in_corridor ? "cluster_" + std::to_string(best.nearest_obstacle_id) : "";
+        st.reason = reason_string();
+        pub_status_->publish(st);
+
+        geometry_msgs::msg::Twist cmd{};
+        // preserve yaw rate while braking, zero only longitudinal; once stopped
+        // the Ackermann plugin cannot yaw, so a passed-through rate would only
+        // swing the wheels to lock while the car sits still
+        if (state_ == AebState::BRAKING)
+        {
+            cmd.angular.z = last_nominal_angular_;
+        }
+        pub_cmd_->publish(cmd);
+
+        publish_debug_markers(clusters);
+    }
+
+    void publish_debug_markers(const std::vector<av::safety::ObstacleCluster> &clusters)
+    {
+        visualization_msgs::msg::MarkerArray obs_array;
+        int id = 0;
+
+        for (const auto &c : clusters)
+        {
+            visualization_msgs::msg::Marker m;
+            m.header.frame_id = "base_link";
+            m.header.stamp = now();
+            m.ns = "aeb_obstacles";
+            m.id = id++;
+            m.type = visualization_msgs::msg::Marker::SPHERE;
+            m.action = visualization_msgs::msg::Marker::ADD;
+            m.pose.position.x = c.centroid.x();
+            m.pose.position.y = c.centroid.y();
+            m.pose.position.z = c.centroid.z();
+            m.pose.orientation.w = 1.0;
+            m.scale.x = 0.4;
+            m.scale.y = 0.4;
+            m.scale.z = 0.4;
+            bool in_risk_state = (state_ == AebState::BRAKING || state_ == AebState::WARNING);
+            m.color.r = in_risk_state ? 1.0 : 0.2;
+            m.color.g = in_risk_state ? 0.2 : 0.8;
+            m.color.b = 0.2;
+            m.color.a = 0.8;
+            m.lifetime = rclcpp::Duration::from_seconds(0.3);
+            obs_array.markers.push_back(m);
+        }
+        pub_obstacles_->publish(obs_array);
+
+        visualization_msgs::msg::MarkerArray corridor_array;
+        visualization_msgs::msg::Marker box;
+        box.header.frame_id = "base_link";
+        box.header.stamp = now();
+        box.ns = "aeb_corridor";
+        box.id = 0;
+        box.type = visualization_msgs::msg::Marker::CUBE;
+        double len = foot_.vehicle_length_m + 2 * foot_.longitudinal_margin_m;
+        box.pose.position.x = len / 2.0;
+        box.pose.orientation.w = 1.0;
+        box.scale.x = len;
+        box.scale.y = foot_.vehicle_width_m + 2 * foot_.lateral_margin_m;
+        box.scale.z = 0.05;
+        box.color.r = (state_ == AebState::BRAKING) ? 1.0 : (state_ == AebState::WARNING ? 1.0 : 0.2);
+        box.color.g = (state_ == AebState::BRAKING) ? 0.0 : (state_ == AebState::WARNING ? 0.6 : 0.8);
+        box.color.b = 0.2;
+        box.color.a = 0.25;
+        box.lifetime = rclcpp::Duration::from_seconds(0.3);
+        corridor_array.markers.push_back(box);
+        pub_corridor_->publish(corridor_array);
     }
 
 private:

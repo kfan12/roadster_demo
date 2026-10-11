@@ -43,6 +43,7 @@ namespace av::safety
     struct CorridorResult
     {
         bool obstacle_in_corridor = false;
+        int nearest_obstacle_id = -1;    // index into clusters[] of the nearest intersecting cluster
         double nearest_distance_m = 1e9; // distance from the FRONT bumper to the nearest intersecting cluster's leading edge
         Eigen::Vector2d nearest_point{0, 0};
     };
@@ -80,6 +81,7 @@ namespace av::safety
             {
                 result.nearest_distance_m = leading_edge;
                 result.nearest_point = q;
+                result.nearest_obstacle_id = &c - &clusters[0];
             }
         }
 

@@ -1,0 +1,43 @@
+# aeb_node tuning. Camera extrinsic/intrinsic mirror sedan.urdf.xacro -
+# keep them in sync if the mount or FOV ever changes there.
+/**:
+  ros__parameters:
+    cam_x: 2.2
+    cam_z: 1.4
+    cam_pitch: 0.06
+    image_width: 424
+    image_height: 300
+    horizontal_fov: 1.9
+
+    min_depth_m: 0.5
+    max_depth_m: 40.0
+    max_lateral_m: 5.0
+    min_obstacle_height_m: 0.15
+    max_obstacle_height_m: 3.0
+    ground_removal_threshold_m: 0.1
+    cluster_voxel_m: 0.5
+    minimum_cluster_points: 5
+
+    prediction_time_sec: 3.0
+    prediction_dt_sec: 0.1
+    mpc_path_timeout_sec: 0.3
+
+    vehicle_length_m: 4.5      # sedan.urdf.xacro ch_l
+    vehicle_width_m: 1.8       # sedan.urdf.xacro ch_w
+    lateral_margin_m: 0.3
+    longitudinal_margin_m: 0.5
+
+    response_time_sec: 0.3
+    ego_emergency_decel_mps2: 6.0
+    distance_offset_m: 1.0
+
+    warning_ttc_sec: 2.5
+    brake_ttc_sec: 1.5
+    collision_hold_sec: 1.0
+    clear_hysteresis_sec: 0.5
+    persistence_ticks: 3
+    stop_hold_speed_mps: 0.1
+
+    aeb_rate_hz: 20.0
+    odom_stale_sec: 0.3
+    depth_stale_sec: 0.3

@@ -43,7 +43,7 @@ namespace av::safety
     inline std::vector<ObstacleCluster> extract_clusters(
         const sensor_msgs::msg::Image::ConstSharedPtr &depth_image,
         const av::proj::Pinhole &pin,
-        const Eigen::Isometry3d &T_cam_base,
+        const Eigen::Isometry3d &T_base_cam,
         const ObstacleFilterParams &fp,
         int stride = 2)
     {
@@ -58,7 +58,7 @@ namespace av::safety
                 if (!std::isfinite(d) || d < fp.min_depth_m || d > fp.max_depth_m)
                     continue;
                 Eigen::Vector3d p_cam = av::proj::pixel_depth_to_camera(pin, u, v, d);
-                Eigen::Vector3d p_base = T_cam_base * p_cam;
+                Eigen::Vector3d p_base = T_base_cam * p_cam;
                 if (std::abs(p_base.y()) > fp.max_lateral_m)
                     continue;
 
