@@ -278,6 +278,13 @@ def main():
                           "turn radius is wheelbase/tan(steering_limit) = "
                           "2.7/tan(0.50) ~= 4.9 m - stay above that with margin "
                           "(e.g. 6-8 m). Leaves the 18 m winding-S arcs alone.")
+    ap.add_argument("--road-block", default=None, metavar="S[,LATERAL]",
+                    help="AEB test prop: drop a static lane-blocking barrier "
+                         "at arc length S (m) along the course, centred "
+                         "LATERAL m left of the centerline (default: right-"
+                         "lane center, -lane_width/2). Recorded in the map "
+                         "json as 'road_block'. Off by default; with it off "
+                         "the output is unchanged.")
     args = ap.parse_args()
 
     if args.turn_radius_m is not None:
@@ -408,6 +415,25 @@ def main():
         sdf.append(box_model(f"bldg_{n_bldg:02d}", cx_, cy_, hgt / 2,
                              w, dep, hgt, rgba, yaw=h))
 
+    # ---------------- road block (AEB test prop) ------------------------------
+    # Dark red, not white/yellow: lane_node's HSV gates (white S<60 V>150,
+    # yellow H 20-38) must not read the barrier as lane paint. Placed AFTER
+    # the building loop so it does not perturb the seeded rng sequence.
+    road_block = None
+    if args.road_block is not None:
+        parts = [float(v) for v in args.road_block.split(",")]
+        rb_s = parts[0]
+        rb_lat = parts[1] if len(parts) > 1 else -lane
+        rb_w, rb_d, rb_h = 2.0, 0.4, 1.0     # across lane, along road, height
+        bx_, by_, bh_ = pose_at(pts, rb_s)
+        rbx, rby = left_of(bx_, by_, bh_, rb_lat)
+        sdf.append(box_model("road_block", rbx, rby, rb_h / 2,
+                             rb_d, rb_w, rb_h, "0.55 0.08 0.08 1", yaw=bh_))
+        road_block = {"x": round(rbx, 3), "y": round(rby, 3),
+                      "yaw": round(bh_, 4), "s": round(rb_s, 2),
+                      "lateral": round(rb_lat, 3),
+                      "size": [rb_d, rb_w, rb_h]}
+
     # ---------------- map json ------------------------------------------------
     spawn_x, spawn_y, spawn_h = pose_at(pts, 3.0)
     spx, spy = left_of(spawn_x, spawn_y, spawn_h, -lane)   # right lane center
@@ -423,6 +449,8 @@ def main():
                    "centerline": [[round(p[1], 2), round(p[2], 2)]
                                   for p in pts[:: 4]]},
     }
+    if road_block is not None:
+        mapj["road_block"] = road_block
 
     # ---------------- write ---------------------------------------------------
     world_name = args.out

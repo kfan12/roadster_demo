@@ -5,6 +5,7 @@ __pycache__/
 local/
 log/
 debug/
+docs/reports/
 .vscode/
 .claude/
 CLAUDE.md

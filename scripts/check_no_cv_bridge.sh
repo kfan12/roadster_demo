@@ -7,6 +7,7 @@ WS="$(cd "$(dirname "$0")/.." && pwd)"
 hits=$(grep -rnE "include.*cv_bridge|import cv_bridge|from cv_bridge" \
   "$WS/src/av_common_cpp" "$WS/src/av_perception_cpp" "$WS/src/av_behavior_cpp" \
   "$WS/src/urban_gazebo" "$WS/src/sedan_description" \
+  "$WS/src/av_safety_cpp" "$WS/src/av_feature_msgs" "$WS/tools" \
   "$WS/src/vlm_planner_py/vlm_planner_py/vlm_server.py" \
   "$WS/src/vlm_planner_py/vlm_planner_py/vlm_scene_node.py" \
   "$WS/src/vlm_planner_py/vlm_planner_py/mission_node.py" \

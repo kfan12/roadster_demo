@@ -10,7 +10,7 @@ uint8 state
 
 bool emergency_active
 
-float64 obstacle_distance_m
+float64 obstacle_distance_m  # front bumper + longitudinal_margin_m to obstacle leading edge; -1 = none in corridor, or FAULT (no valid measurement)
 float64 relative_speed_mps
 float64 time_to_collision_sec
 float64 safe_braking_distance_m

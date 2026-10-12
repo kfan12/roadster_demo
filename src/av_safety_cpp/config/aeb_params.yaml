@@ -20,6 +20,7 @@
 
     prediction_time_sec: 3.0
     prediction_dt_sec: 0.1
+    min_corridor_lookahead_m: 5.0  # kinematic corridor reaches at least this far past bumper + margin, even at standstill
     mpc_path_timeout_sec: 0.3
 
     vehicle_length_m: 4.5      # sedan.urdf.xacro ch_l
