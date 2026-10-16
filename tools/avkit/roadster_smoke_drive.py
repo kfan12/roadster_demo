@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """roadster_smoke_drive.py - Phase 1 smoke test for roadster_description.
 
-Run against `ros2 launch roadster_description roadster_smoke.launch.py`.
+Run against `ros2 launch roadster_description roadster_sim.launch.py` (flat runway).
 1. At rest: sums the four wheel force/torque magnitudes and compares them with
    the sprung weight (everything above the wheel joints).
 2. Tire-only launch: commands the same torque on all four wheels and reports

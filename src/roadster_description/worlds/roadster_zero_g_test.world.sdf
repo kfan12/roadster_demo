@@ -1,0 +1,37 @@
+<?xml version="1.0" ?>
+<!-- Zero-gravity, contact-free world for the actuation force-point / sign test
+     (tools/avkit/roadster_actuation_test.py). With no gravity and nothing to
+     touch, the only forces on the car are the actuation system's, so measured
+     linear and angular accelerations can be compared with sum F / m and
+     I^-1 (r x F) nozzle by nozzle. -->
+<sdf version="1.8">
+  <world name="roadster_zero_g_test">
+    <physics name="1ms" type="dart">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system"
+            name="ignition::gazebo::systems::Physics">
+      <engine><filename>ignition-physics-dartsim-plugin</filename></engine>
+    </plugin>
+    <plugin filename="ignition-gazebo-user-commands-system"
+            name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system"
+            name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-imu-system"
+            name="ignition::gazebo::systems::Imu"/>
+    <plugin filename="ignition-gazebo-forcetorque-system"
+            name="ignition::gazebo::systems::ForceTorque"/>
+    <plugin filename="ignition-gazebo-contact-system"
+            name="ignition::gazebo::systems::Contact"/>
+
+    <gravity>0 0 0</gravity>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 50 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+  </world>
+</sdf>

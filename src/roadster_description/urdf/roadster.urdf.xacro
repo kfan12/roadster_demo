@@ -36,6 +36,12 @@
     <xacro:arg name="tire_mu" default="1.2" />
     <xacro:arg name="controllers_file"
         default="$(find roadster_description)/config/ros2_controllers.yaml" />
+    <!-- actuation (roadster_gz_plugins): the world's analytic surfaces for the
+       fan gap (maps/<world>.json, passed in by the launch file; empty = z = 0
+       ground plane) and the fan's spin state at spawn (1.0 lets a car spawned
+       against a ceiling hold from t = 0 instead of falling during spin-up) -->
+    <xacro:arg name="surfaces_file" default="" />
+    <xacro:arg name="fan_initial_speed" default="0.0" />
 
     <!-- ===================== PHYSICAL PARAMETERS ===================== -->
     <xacro:property name="wheelbase" value="2.7" />
@@ -419,6 +425,49 @@
         <plugin filename="libgz_ros2_control-system.so"
             name="gz_ros2_control::GazeboSimROS2ControlPlugin">
             <parameters>$(arg controllers_file)</parameters>
+        </plugin>
+    </gazebo>
+
+    <!-- ===================== STUNT ACTUATION ===================== -->
+    <!-- tank + 10 cold-gas nozzles + suction fan, all in one force-writing
+       system (roadster_gz_plugins). Parameter sources and confidence:
+       docs/plans/roadster_demo_plan.md sections 2 and 7. Force magnitudes are
+       multiples of the model's total weight, computed by the plugin. -->
+    <gazebo>
+        <plugin filename="roadster_actuation_system"
+            name="roadster_gz_plugins::RoadsterActuationSystem">
+            <link_name>base_link</link_name>
+            <!-- chassis frame (nozzles.yaml) relative to the SDF link: chassis
+               is lumped into base_link, wheel_radius above it -->
+            <frame_offset>0 0 ${wheel_radius}</frame_offset>
+            <nozzles_file>$(find roadster_description)/config/nozzles.yaml</nozzles_file>
+            <surfaces_file>$(arg surfaces_file)</surfaces_file>
+            <state_rate_hz>200</state_rate_hz>
+            <tank>
+                <volume_m3>0.6</volume_m3>
+                <p0_bar>400</p0_bar>
+                <temperature_k>293</temperature_k>
+                <p_reg_bar>100</p_reg_bar>
+                <p_min_bar>25</p_min_bar>
+                <feed_mode>regulated</feed_mode>
+            </tank>
+            <nozzle_defaults>
+                <tau_rise_s>0.02</tau_rise_s>
+                <tau_fall_s>0.02</tau_fall_s>
+                <min_on_time_s>0.02</min_on_time_s>
+                <exhaust_velocity>350</exhaust_velocity>
+            </nozzle_defaults>
+            <fan>
+                <!-- 1.5 m g: inverted hold needs > 1 m g (plan section 3) -->
+                <f_max_mg>1.5</f_max_mg>
+                <tau_s>0.3</tau_s>
+                <h_seal_m>0.35</h_seal_m>
+                <h_max_m>1.0</h_max_m>
+                <!-- floor-pan underside center, chassis frame -->
+                <point>0 0 ${-ch_h/2}</point>
+                <max_surface_angle_deg>45</max_surface_angle_deg>
+                <initial_speed>$(arg fan_initial_speed)</initial_speed>
+            </fan>
         </plugin>
     </gazebo>
 

@@ -23,7 +23,7 @@ Everything the demo needs exists on Fortress, verified on this machine on 2026-1
 
 | Need | Fortress availability (verified) |
 | --- | --- |
-| Apply force/torque from a system plugin | `components/ExternalWorldWrenchCmd.hh` present. `Link::AddWorldWrench` is **not** in Fortress's `Link.hh`, so plugins write the component directly. |
+| Apply force/torque from a system plugin | `Link::AddWorldForce` / `AddWorldWrench` present (in `gz/sim/Link.hh`, which `ignition/gazebo/Link.hh` redirects to; an earlier check grepped only the redirect and wrongly reported them missing). They accumulate into `ExternalWorldWrenchCmd`. `AddWorldForce`'s `position` is an offset from the link COM, verified by the zero-g test. |
 | Ready-made wrench plugin for prototyping | `ignition-gazebo-apply-link-wrench-system` present (6.18 backport). |
 | Wheel normal-force measurement | `forcetorque-system` + `components/JointTransmittedWrench.hh` present. |
 | Body/landing contact | `contact-system` present. |
@@ -153,14 +153,12 @@ src/
     config/nozzles.yaml                  nozzle layout, read by the xacro and later by the thruster plugin
     config/ros2_controllers.yaml
     config/bridge_roadster.yaml
-    launch/roadster_smoke.launch.py      flat-runway smoke test (worlds/roadster_flat_test.world.sdf)
+    launch/roadster_sim.launch.py        world / spawn pose / paused / surfaces args (worlds/roadster_*_test.world.sdf)
     config/roadster_params.yaml          (Phase 0) single source of the remaining physical + actuator parameters
-  roadster_gz_plugins/         C++ Gazebo Fortress systems (ignition::gazebo::System)
-    src/cold_gas_thruster_system.cpp     owns the tank model too (see 5.2)
-    src/suction_fan_system.cpp
-    src/wrench_accumulator.hpp           shared helper: ADD into ExternalWorldWrenchCmd, never overwrite
-    include/roadster_gz_plugins/thrust_model.hpp, tank_model.hpp, fan_model.hpp   pure math, unit-tested
-    test/test_thrust_model.cpp, test_tank_model.cpp, test_fan_model.cpp
+  roadster_gz_plugins/         BUILT 2026-10-16. ONE Gazebo Fortress system writes every stunt force
+    src/roadster_actuation_system.cpp    tank + 10 nozzles + suction fan (+ rear door later)
+    include/roadster_gz_plugins/tank_model.hpp, nozzle_model.hpp, fan_model.hpp   pure math, unit-tested
+    test/test_models.cpp
   roadster_control/            C++ ROS 2 nodes
     src/stunt_mission_node.cpp           BehaviorTree.CPP v3 mission FSM + drive/fan/attitude loops
     src/thrust_allocator.cpp             OSQP QP B u = [F; tau], 0 <= u <= 1, plus PWM
@@ -214,10 +212,11 @@ Language policy holds: everything in the control loop is C++; Python is only wor
 - Per nozzle i: body-frame position r_i, unit direction e_i, `f_max_i` at `p_ref`, valve time constants `tau_rise`/`tau_fall` (10-30 ms), `min_on_time`, thrust-curve exponent, optional jitter.
 - Thrust: F_i = u_i,actual x f_max_i x (P_feed / p_ref), where P_feed is p_reg while the regulator holds and P_tank otherwise, and p_ref = p_reg (the PDF's F = Cf Pt At with Cf At folded into f_max / p_ref); mass flow mdot_i = F_i / v_e.
 - Valve: first-order lag from command to u_actual, with min-on-time enforced in the plugin so the controller cannot cheat it.
-- Force on the chassis link at r_i, rotated by the current link pose; torque about the link origin is r_world x F_world, and Gazebo applies `ExternalWorldWrenchCmd` at the link origin, so the URDF puts the chassis link origin at the COM (or the plugin adds the COM offset term explicitly; unit test checks the sign).
-- **Wrench accumulation:** `ExternalWorldWrenchCmd` is a single component per link and is cleared every step; three systems (thruster, fan, optional stick fallback) write to it.
-  Each system reads the existing component and adds to it in `PreUpdate`, via `wrench_accumulator.hpp`.
-  A unit/integration test spawns two systems and checks the sum, since a silent overwrite would look like "thrusters too weak".
+- Force on the SDF link (`base_link`, into which sdformat lumps `chassis`) through `Link::AddWorldForce(F_world, offset)`, rotated by the current link pose.
+  The offset is measured from the link COM, so the plugin passes `frame_offset + r_i - com_link`; passing link-frame points instead doubled the rear-main pitch lever (0.63 m vs 0.30 m) in the first zero-g run.
+- **Single writer:** tank, nozzles and fan live in one system (`RoadsterActuationSystem`), so there is no cross-system ordering or overwrite question.
+- **Verified (2026-10-16):** `tools/avkit/roadster_actuation_test.py` in `roadster_zero_g_test` fires every nozzle alone plus three combinations and compares with the rigid-body prediction from the expanded URDF: force within 0.3% and torque within 0.1% on all 13 patterns.
+  Fortress's WorldControl reset left the car moving, so the test runs bursts back to back and compares torques through the full Euler equation.
 - Rear nozzle door: a prismatic or revolute joint driven by the plugin through `JointPositionCmd`-style position control; the rear main nozzles are masked to 0 until the door reports open.
 - Plume: one `particle-emitter2` emitter per nozzle, rate scaled by u_actual; visual only, plus optional ground-impingement force (off by default).
 
@@ -284,7 +283,7 @@ Each phase ends with a recorded run and an analyzer report under `data/stunt_run
 | 8 | Calibration and polish | Video calibration (Section 8), plume tuning, RViz config, camera-on video render, report under `docs/reports/` | Fitted flight time and roll rate within 10% of the livestream measurements; full Demo A/B/C reel recorded |
 | 9 (optional) | Integration with the driving stack | Requires Day 17 arbiter; stunt node becomes an arbiter source; urban course leg drives to the ramp entry | Lane-following leg hands over to the stunt FSM at the ramp entry with no command gap over 50 ms |
 
-Phase 1 status (2026-10-16): the model part is done and smoke-tested with `tools/avkit/roadster_smoke_drive.py` on `roadster_smoke.launch.py` at 1,800 kg total.
+Phase 1 status (2026-10-16): the model part is done and smoke-tested with `tools/avkit/roadster_smoke_drive.py` on `roadster_sim.launch.py` (then named `roadster_smoke.launch.py`) at 1,800 kg total.
 The four wheel normal forces sum to the sprung weight within 0.1%, steering settles from a 0.3 rad step in 0.175 s, the full-torque tire-only 0-60 mph takes 2.29 s (1.19 g, mass-independent as expected, inside the 2.2-2.6 s window), yaw drift is 0.01 deg, and RTF is 1.00 at the 1 ms step.
 Two findings fed back into the model: Fortress ignores a contact sensor's `<topic>` (the launch file bridges the world-scoped name instead), and the sedan's 400 N.m steering effort stalls under standstill tire scrub at 1,800 kg (raised to 3000 N.m).
 Still open for Phase 1: a drive controller with traction control (at full torque the wheels spin to their 200 rad/s limit, slip ratio +1.46), wheel odometry, and the Bullet smoke test.
@@ -360,5 +359,5 @@ Every entry carries `value`, `source` and `confidence` fields in the YAML; the t
 
 ## Appendix B: Harmonic upgrade path
 
-If the stack later moves to Jazzy + Harmonic: rename `ignition::gazebo` to `gz::sim` in the three plugins, switch to `Link::AddWorldWrench` (which accumulates natively, so `wrench_accumulator.hpp` can go), optionally replace the analytic gap with physics ray queries, swap `ign_ros2_control` for `gz_ros2_control`, and re-verify the bridge type mappings.
+If the stack later moves to Jazzy + Harmonic: rename `ignition::gazebo` to `gz::sim` in the actuation system (re-run the zero-g test, since `AddWorldForce`'s offset convention must be re-checked), optionally replace the analytic gap with physics ray queries, swap `ign_ros2_control` for `gz_ros2_control`, and re-verify the bridge type mappings.
 The pure-math headers, controllers, planner, tooling and parameter files carry over unchanged.

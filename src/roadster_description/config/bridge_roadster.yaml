@@ -45,5 +45,49 @@
   gz_type_name:   "ignition.msgs.Wrench"
   direction: GZ_TO_ROS
 
+# ---- stunt actuation (roadster_gz_plugins/RoadsterActuationSystem) ----
+# thruster order = nozzles.yaml names sorted alphabetically
+- ros_topic_name: "/roadster/thruster_cmd"
+  gz_topic_name:  "/roadster/thruster_cmd"
+  ros_type_name:  "ros_gz_interfaces/msg/Float32Array"
+  gz_type_name:   "ignition.msgs.Float_V"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/roadster/fan_cmd"
+  gz_topic_name:  "/roadster/fan_cmd"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: ROS_TO_GZ
+
+- ros_topic_name: "/roadster/thruster_state"
+  gz_topic_name:  "/roadster/thruster_state"
+  ros_type_name:  "ros_gz_interfaces/msg/Float32Array"
+  gz_type_name:   "ignition.msgs.Float_V"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/tank/pressure"
+  gz_topic_name:  "/roadster/tank/pressure"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/tank/mass"
+  gz_topic_name:  "/roadster/tank/mass"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/fan_force"
+  gz_topic_name:  "/roadster/fan_force"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/fan_gap"
+  gz_topic_name:  "/roadster/fan_gap"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: GZ_TO_ROS
+
 # /roadster/body_contact is bridged by the launch file: Fortress publishes the
 # contact sensor on a world-scoped name, so it cannot live in this yaml.
