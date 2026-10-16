@@ -14,7 +14,13 @@ Publishes:
                     so they trail behind the car through the flip; a fan disc
                     under the floor glowing with fan speed, and animated
                     suction streaks converging from the surface into it
-  /stunt/trail      Path of base_link in the odom (= world) frame
+  /stunt/viz (also) IMU: specific-force (green) and angular-rate (magenta)
+                    arrows at the IMU + a readout with the estimate error;
+                    control: requested (red) vs allocated (yellow) thrust
+                    force and requested torque (cyan) at the COM, per-wheel
+                    drive/brake torque arrows, and a control panel
+  /stunt/trail      Path of base_link in the odom (= world) frame (truth)
+  /stunt/trail_est  the same from /odom_est (IMU state estimate)
 
 Nothing here feeds back into control.
 """
@@ -29,6 +35,7 @@ from geometry_msgs.msg import Point, PoseStamped
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import Imu
 from ros_gz_interfaces.msg import Float32Array
 from std_msgs.msg import ColorRGBA, Float64
 from visualization_msgs.msg import Marker, MarkerArray
@@ -98,6 +105,15 @@ class StuntViz(Node):
         self.create_subscription(StuntStatus, '/stunt/status',
                                  lambda m: setattr(self, 'status', m), 10)
         self.create_subscription(Odometry, '/odom_truth', self._odom, 50)
+        # IMU + the IMU state estimate (its path is drawn next to the true one)
+        self.imu = None
+        self.odom_est = None
+        self.trail_est = Path()
+        self.trail_est.header.frame_id = 'odom'
+        self.last_est_t = -1.0
+        self.pub_trail_est = self.create_publisher(Path, '/stunt/trail_est', 10)
+        self.create_subscription(Imu, '/imu', lambda m: setattr(self, 'imu', m), 10)
+        self.create_subscription(Odometry, '/odom_est', self._odom_est, 50)
 
         self.pub_world.publish(self.world_markers(world_json))
         self.create_timer(0.05, self.tick)
@@ -168,6 +184,17 @@ class StuntViz(Node):
             self.trail.poses.append(ps)
             self.trail.header.stamp = m.header.stamp
 
+    def _odom_est(self, m):
+        self.odom_est = m
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        if t - self.last_est_t >= 0.05:
+            self.last_est_t = t
+            ps = PoseStamped()
+            ps.header = m.header
+            ps.pose = m.pose.pose
+            self.trail_est.poses.append(ps)
+            self.trail_est.header.stamp = m.header.stamp
+
     def arrow(self, mid, frame, tip, color, shaft=0.18):
         a = Marker()
         a.header.frame_id = frame
@@ -212,9 +239,99 @@ class StuntViz(Node):
                         f'flip {math.degrees(s.roll_progress):5.1f} deg   '
                         f'gas {s.tank_mass:5.1f} kg')
             arr.markers.append(txt)
+            self.imu_and_control(arr, s, p, q, up)
         self.pub.publish(arr)
         self.pub_trail.publish(self.trail)
+        self.pub_trail_est.publish(self.trail_est)
         self.pub_flow.publish(self.flow())
+
+    # ------------------------------------------------------------ IMU + control
+    def text(self, mid, ns, pos, body, color, size=0.45):
+        m = Marker()
+        m.header.frame_id = 'odom'
+        m.ns = ns
+        m.id = mid
+        m.type = Marker.TEXT_VIEW_FACING
+        m.pose.position = pos
+        m.pose.orientation.w = 1.0
+        m.scale.z = size
+        m.color = color
+        m.text = body
+        return m
+
+    def imu_and_control(self, arr, s, p, q, up):
+        mg = self.mass * G
+        side = 3.0 if up > -0.5 else -3.0  # panels above the car, below it when inverted
+        # ---- IMU (sensor frame = chassis axes at the chassis origin)
+        if self.imu is not None:
+            f = self.imu.linear_acceleration
+            w = self.imu.angular_velocity
+            fa = self.arrow(0, 'imu_link', pt(f.x * 0.15, f.y * 0.15, f.z * 0.15),
+                            rgba(0.2, 1.0, 0.3, 0.95), shaft=0.12)
+            fa.ns = 'imu_specific_force'
+            arr.markers.append(fa)
+            wa = self.arrow(0, 'imu_link', pt(w.x * 1.0, w.y * 1.0, w.z * 1.0),
+                            rgba(1.0, 0.2, 1.0, 0.95), shaft=0.12)
+            wa.ns = 'imu_rate'
+            arr.markers.append(wa)
+            fn = math.sqrt(f.x * f.x + f.y * f.y + f.z * f.z)
+            est = ''
+            if self.odom_est is not None:
+                e = self.odom_est.pose.pose.position
+                err = math.dist((e.x, e.y, e.z), (p.x, p.y, p.z))
+                est = f'\nestimate error {err * 100:5.1f} cm'
+            arr.markers.append(self.text(
+                0, 'imu_panel', pt(p.x + 5.0, p.y, p.z + side),
+                f'IMU  |f| {fn / G:4.2f} g\n'
+                f'f  ({f.x:+6.1f} {f.y:+6.1f} {f.z:+6.1f}) m/s2\n'
+                f'w  ({w.x:+5.2f} {w.y:+5.2f} {w.z:+5.2f}) rad/s{est}',
+                rgba(0.6, 1.0, 0.6, 1.0)))
+        # ---- control: requested vs allocated thrust force and torque at the COM
+        R = quat_rot((q.x, q.y, q.z, q.w), (0.0, 0.0, CHASSIS_Z))
+        com = (p.x + R[0], p.y + R[1], p.z + R[2])
+        wd, wa_ = s.wrench_des, s.wrench_alloc  # forces world axes, torques body axes
+
+        def world_arrow(mid, ns, vec, scale, color, shaft):
+            m = Marker()
+            m.header.frame_id = 'odom'
+            m.ns = ns
+            m.id = mid
+            m.type = Marker.ARROW
+            m.pose.orientation.w = 1.0
+            m.points = [pt(*com), pt(com[0] + vec[0] * scale, com[1] + vec[1] * scale,
+                                     com[2] + vec[2] * scale)]
+            m.scale.x, m.scale.y, m.scale.z = shaft, shaft * 2, shaft * 2
+            on = math.sqrt(sum(v * v for v in vec)) * scale > 0.05
+            m.color = color if on else rgba(0, 0, 0, 0)
+            return m
+        arr.markers.append(world_arrow(0, 'ctrl_force_des', wd[:3], self.arrow_per_mg / mg,
+                                       rgba(1.0, 0.15, 0.15, 0.9), 0.2))
+        arr.markers.append(world_arrow(0, 'ctrl_force_alloc', wa_[:3], self.arrow_per_mg / mg,
+                                       rgba(1.0, 0.9, 0.1, 0.9), 0.12))
+        tq = quat_rot((q.x, q.y, q.z, q.w), tuple(wd[3:]))  # body torque -> world axes
+        arr.markers.append(world_arrow(0, 'ctrl_torque_des', tq, 1.0 / 10000.0,
+                                       rgba(0.1, 0.9, 1.0, 0.9), 0.12))
+        # per-wheel drive (+) / brake (-) torque along the car's x axis
+        for i, (wx, wy) in enumerate(((1.35, 0.8), (1.35, -0.8), (-1.35, 0.8), (-1.35, -0.8))):
+            m = self.arrow(i, 'chassis', pt(0, 0, 0), rgba(0, 0, 0, 0), shaft=0.1)
+            m.ns = 'ctrl_wheel_torque'
+            m.points = [pt(wx, wy, 0.0), pt(wx + s.wheel_torque[i] / 1000.0, wy, 0.0)]
+            m.color = (rgba(0.2, 1.0, 0.2, 0.9) if s.wheel_torque[i] >= 0
+                       else rgba(1.0, 0.3, 0.2, 0.9))
+            if abs(s.wheel_torque[i]) < 20:
+                m.color = rgba(0, 0, 0, 0)
+            arr.markers.append(m)
+        arr.markers.append(self.text(
+            0, 'control_panel', pt(p.x - 5.0, p.y, p.z + side),
+            f'CONTROL  {s.state}  ({s.t_state:4.1f} s)\n'
+            f'speed {s.speed:5.2f} / ref {s.speed_ref:5.2f} m/s\n'
+            f'wheel torque {" ".join(f"{x:+5.0f}" for x in s.wheel_torque)} N.m\n'
+            f'fan {s.fan_cmd:3.1f}   attitude err {math.degrees(s.attitude_error):5.2f} deg\n'
+            f'h {max(s.height, 0):5.2f} m  vz {s.vz:+6.2f} m/s\n'
+            f'thrust des ({wd[0] / 1000:+5.1f} {wd[1] / 1000:+5.1f} {wd[2] / 1000:+5.1f}) kN\n'
+            f'torque des ({wd[3] / 1000:+5.1f} {wd[4] / 1000:+5.1f} {wd[5] / 1000:+5.1f}) kN.m\n'
+            f'gas {s.tank_mass:5.1f} kg  impulse {s.impulse_used / 1000:5.1f} kN.s',
+            rgba(1.0, 0.85, 0.5, 1.0)))
 
     # ------------------------------------------------------------ air flow
     def spawn(self, origin_ch, direction_ch, level, speed, kind, q, base):

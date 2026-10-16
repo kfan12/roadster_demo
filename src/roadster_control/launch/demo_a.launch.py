@@ -11,10 +11,13 @@ further `start_delay` sim seconds, the car drives: run-in -> up the 8 m loop
 on fan suction -> stops upside down on the overhang -> holds 2 s -> lets go,
 kick-flips 180 deg on its cold-gas nozzles -> brake burn -> lands.
 
+The mission flies on the IMU state estimate (state:=truth for Gazebo truth).
 RViz shows the car, the ramp (from maps/<world>.json), one orange arrow per
 nozzle (length ~ thrust), the air flow (white exhaust puffs, blue fan exhaust,
 a fan disc glowing with fan speed and suction streaks into it), a state panel,
-the path trail, and two Gazebo-rendered camera panels: the trackside camera
+the true (yellow) and estimated (orange) path trails, IMU arrows and readout,
+control arrows (requested / allocated thrust, torque, wheel torques) and a
+control panel, and two Gazebo-rendered camera panels: the trackside camera
 filming the stunt and the car's onboard camera (onboard_camera:=false to save
 render time). In Gazebo the nozzles and fan exhaust emit particle plumes.
 Generate the world first if it is missing:
@@ -49,7 +52,7 @@ def setup(context):
         PythonLaunchDescriptionSource(os.path.join(ctrl, 'launch', 'stunt_mission.launch.py')),
         launch_arguments={'mode': 'ramp', 'world': world,
                           'release_after_hold': cfg['release_after_hold'],
-                          'start_delay': cfg['start_delay']}.items())
+                          'start_delay': cfg['start_delay'], 'state': cfg['state']}.items())
     viz = Node(package='roadster_control', executable='stunt_viz.py', name='stunt_viz',
                output='screen',
                parameters=[{'use_sim_time': True, 'world_json': world_json,
@@ -77,6 +80,8 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value='roadster_ramp'),
         DeclareLaunchArgument('gui', default_value='true', description='Gazebo window'),
         DeclareLaunchArgument('rviz', default_value='true'),
+        DeclareLaunchArgument('state', default_value='imu',
+                              description="'imu' = fly on the IMU state estimate, 'truth' = Gazebo"),
         DeclareLaunchArgument('onboard_camera', default_value='true',
                               description="the car's front camera (shown in RViz); "
                                           'costs real-time factor under software GL'),

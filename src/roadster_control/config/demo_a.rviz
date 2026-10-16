@@ -121,6 +121,26 @@ Visualization Manager:
         X: 0
         Y: 0
         Z: 0
+    # the IMU state estimate's path, next to the true one (yellow)
+    - Class: rviz_default_plugins/Path
+      Name: trail (IMU estimate)
+      Enabled: true
+      Topic:
+        Value: /stunt/trail_est
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Color: 255; 120; 0
+      Alpha: 1
+      Buffer Length: 1
+      Line Style: Billboards
+      Line Width: 0.05
+      Pose Style: None
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
     - Class: rviz_default_plugins/TF
       Name: TF (nozzle frames)
       Enabled: false
