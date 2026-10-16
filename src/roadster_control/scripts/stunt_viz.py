@@ -78,6 +78,11 @@ class StuntViz(Node):
         self.mass = self.declare_parameter('mass', 1800.0).value
         # arrow length per m g of force [m]
         self.arrow_per_mg = self.declare_parameter('arrow_per_mg', 1.2).value
+        # HUD column (world frame): in the sky left of demo_a.rviz's side-on view
+        self.hud_x = self.declare_parameter('hud_x', -24.0).value
+        self.hud_top = self.declare_parameter('hud_top', 21.0).value
+        self.hud_size = self.declare_parameter('hud_size', 0.55).value
+        self.hud_gap = self.declare_parameter('hud_gap', 0.8).value
         geo = yaml.safe_load(open(nozzles_file))['nozzles']
         self.nozzles = sorted(geo)
         self.nozzle_geo = [(geo[n]['xyz'], [-c for c in geo[n]['force_dir']], geo[n]['f_max_mg'])
@@ -229,21 +234,39 @@ class StuntViz(Node):
             txt.ns = 'status'
             txt.id = 0
             txt.type = Marker.TEXT_VIEW_FACING
-            txt.pose.position = pt(p.x, p.y, p.z + (3.0 if up > -0.5 else -3.0))
+            # only a short state label rides with the car; the details go to
+            # the fixed HUD column (panels around the car overlapped)
+            txt.pose.position = pt(p.x, p.y, p.z + (2.2 if up > -0.5 else -2.2))
             txt.pose.orientation.w = 1.0
-            txt.scale.z = 0.6
+            txt.scale.z = 0.7
             txt.color = rgba(1, 1, 1, 1)
-            txt.text = (f'{s.state}\n'
-                        f'speed {s.speed:4.1f} m/s   height {max(s.height, 0):4.1f} m\n'
-                        f'thrust {sum(self.thrust) / 1000:5.1f} kN   fan {self.fan / 1000:4.1f} kN\n'
-                        f'flip {math.degrees(s.roll_progress):5.1f} deg   '
-                        f'gas {s.tank_mass:5.1f} kg')
+            txt.text = s.state
             arr.markers.append(txt)
-            self.imu_and_control(arr, s, p, q, up)
+            panels = [('mission_panel', rgba(1, 1, 1, 1),
+                       f'MISSION  {s.state}\n'
+                       f'speed {s.speed:4.1f} m/s   height {max(s.height, 0):4.1f} m\n'
+                       f'thrust {sum(self.thrust) / 1000:5.1f} kN   fan {self.fan / 1000:4.1f} kN\n'
+                       f'flip {math.degrees(s.roll_progress):5.1f} deg   gas {s.tank_mass:5.1f} kg')]
+            panels += self.imu_and_control(arr, s, p, q)
+            self.hud(arr, panels)
         self.pub.publish(arr)
         self.pub_trail.publish(self.trail)
         self.pub_trail_est.publish(self.trail_est)
         self.pub_flow.publish(self.flow())
+
+    # ------------------------------------------------------------ HUD
+    def hud(self, arr, panels):
+        """Stack text panels in a fixed column in the sky, left of the default
+        side-on view, top-down by line count so they never overlap. (A true
+        screen overlay needs ros-humble-rviz-2d-overlay-plugins.)"""
+        size = self.hud_size
+        line = size * 1.3
+        top = self.hud_top
+        for ns, color, body in panels:
+            n = body.count('\n') + 1
+            arr.markers.append(self.text(0, ns, pt(self.hud_x, 0.0, top - n * line / 2),
+                                         body, color, size))
+            top -= n * line + self.hud_gap
 
     # ------------------------------------------------------------ IMU + control
     def text(self, mid, ns, pos, body, color, size=0.45):
@@ -259,9 +282,10 @@ class StuntViz(Node):
         m.text = body
         return m
 
-    def imu_and_control(self, arr, s, p, q, up):
+    def imu_and_control(self, arr, s, p, q):
+        """IMU and control arrows; returns their HUD panels."""
         mg = self.mass * G
-        side = 3.0 if up > -0.5 else -3.0  # panels above the car, below it when inverted
+        panels = []
         # ---- IMU (sensor frame = chassis axes at the chassis origin)
         if self.imu is not None:
             f = self.imu.linear_acceleration
@@ -280,12 +304,10 @@ class StuntViz(Node):
                 e = self.odom_est.pose.pose.position
                 err = math.dist((e.x, e.y, e.z), (p.x, p.y, p.z))
                 est = f'\nestimate error {err * 100:5.1f} cm'
-            arr.markers.append(self.text(
-                0, 'imu_panel', pt(p.x + 5.0, p.y, p.z + side),
-                f'IMU  |f| {fn / G:4.2f} g\n'
-                f'f  ({f.x:+6.1f} {f.y:+6.1f} {f.z:+6.1f}) m/s2\n'
-                f'w  ({w.x:+5.2f} {w.y:+5.2f} {w.z:+5.2f}) rad/s{est}',
-                rgba(0.6, 1.0, 0.6, 1.0)))
+            panels.append(('imu_panel', rgba(0.6, 1.0, 0.6, 1.0),
+                           f'IMU  |f| {fn / G:4.2f} g\n'
+                           f'f  ({f.x:+6.1f} {f.y:+6.1f} {f.z:+6.1f}) m/s2\n'
+                           f'w  ({w.x:+5.2f} {w.y:+5.2f} {w.z:+5.2f}) rad/s{est}'))
         # ---- control: requested vs allocated thrust force and torque at the COM
         R = quat_rot((q.x, q.y, q.z, q.w), (0.0, 0.0, CHASSIS_Z))
         com = (p.x + R[0], p.y + R[1], p.z + R[2])
@@ -321,8 +343,8 @@ class StuntViz(Node):
             if abs(s.wheel_torque[i]) < 20:
                 m.color = rgba(0, 0, 0, 0)
             arr.markers.append(m)
-        arr.markers.append(self.text(
-            0, 'control_panel', pt(p.x - 5.0, p.y, p.z + side),
+        panels.insert(0, (
+            'control_panel', rgba(1.0, 0.85, 0.5, 1.0),
             f'CONTROL  {s.state}  ({s.t_state:4.1f} s)\n'
             f'speed {s.speed:5.2f} / ref {s.speed_ref:5.2f} m/s\n'
             f'wheel torque {" ".join(f"{x:+5.0f}" for x in s.wheel_torque)} N.m\n'
@@ -330,8 +352,8 @@ class StuntViz(Node):
             f'h {max(s.height, 0):5.2f} m  vz {s.vz:+6.2f} m/s\n'
             f'thrust des ({wd[0] / 1000:+5.1f} {wd[1] / 1000:+5.1f} {wd[2] / 1000:+5.1f}) kN\n'
             f'torque des ({wd[3] / 1000:+5.1f} {wd[4] / 1000:+5.1f} {wd[5] / 1000:+5.1f}) kN.m\n'
-            f'gas {s.tank_mass:5.1f} kg  impulse {s.impulse_used / 1000:5.1f} kN.s',
-            rgba(1.0, 0.85, 0.5, 1.0)))
+            f'impulse {s.impulse_used / 1000:5.1f} kN.s'))
+        return panels
 
     # ------------------------------------------------------------ air flow
     def spawn(self, origin_ch, direction_ch, level, speed, kind, q, base):
