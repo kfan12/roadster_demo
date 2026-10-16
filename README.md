@@ -6,9 +6,7 @@ The car drives up a curved ramp past vertical, held on by suction fans, stops up
 It is a plausible engineering reproduction built on public reporting, not a replica of Tesla's hardware or controller: the nozzle layout, fan force, mass and ramp size are assumptions (see `docs/plans/roadster_demo_plan.md` for sources, confidence and the full plan).
 The car model was derived from the sedan in [kfan12/vlm_av_ws](https://github.com/kfan12/vlm_av_ws), where this work started as a branch; that repository's history is kept here, but the autonomous-driving stack itself now lives only there.
 
-[![Roadster flip video: click to play](docs/snapshots/roadster_flip_trackside.png)](docs/snapshots/Roadster_Flip.mp4)
-
-Click the image above to watch the full stunt run ([`docs/snapshots/Roadster_Flip.mp4`](docs/snapshots/Roadster_Flip.mp4)).
+https://github.com/user-attachments/assets/68e27f08-d7c8-4282-83e2-6fadb10eb732
 
 | Drive-off, upside down (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
 | --- | --- | --- | --- |
