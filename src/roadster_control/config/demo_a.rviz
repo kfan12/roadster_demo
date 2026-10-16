@@ -1,0 +1,129 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+      Splitter Ratio: 0.5
+    Tree Height: 400
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (ground, 2 m)
+      Enabled: true
+      Cell Size: 2
+      Plane Cell Count: 40
+      Plane: XY
+      Color: 140; 140; 145
+      Alpha: 0.5
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Offset:
+        X: -10
+        Y: 0
+        Z: 0
+      Reference Frame: <Fixed Frame>
+    # ramp arc, overhang and ceilings from maps/<world>.json (stunt_viz.py)
+    - Class: rviz_default_plugins/MarkerArray
+      Name: stunt surfaces
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Value: /stunt/viz_world
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/RobotModel
+      Name: roadster
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 1
+    # nozzle plumes (orange, length ~ thrust), fan suction (blue), state panel
+    - Class: rviz_default_plugins/MarkerArray
+      Name: thrust, fan, state
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Value: /stunt/viz
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Path
+      Name: trail (base_link)
+      Enabled: true
+      Topic:
+        Value: /stunt/trail
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Color: 255; 220; 0
+      Alpha: 1
+      Buffer Length: 1
+      Line Style: Billboards
+      Line Width: 0.08
+      Pose Style: None
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+    - Class: rviz_default_plugins/TF
+      Name: TF (nozzle frames)
+      Enabled: false
+      Marker Scale: 0.6
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+      Update Interval: 0
+  Enabled: true
+  Global Options:
+    Background Color: 38; 40; 46
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    # side-on from -y: the car drives left to right, the whole loop in frame
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Target Frame: <Fixed Frame>
+      Focal Point:
+        X: -6
+        Y: 0
+        Z: 7
+      Distance: 40
+      Pitch: 0.12
+      Yaw: 4.712
+      Field of View: 0.785
+      Near Clip Distance: 0.01
+      Value: Orbit (rviz)
+    Saved: ~
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 900
+  Width: 1500
+  Hide Left Dock: false
+  Hide Right Dock: true

@@ -13,6 +13,14 @@
   gz_type_name:   "ignition.msgs.IMU"
   direction: GZ_TO_ROS
 
+# ground-truth odom -> base_link transform for RViz (the OdometryPublisher's
+# TF, absolute world coordinates, so the "odom" frame IS the Gazebo world)
+- ros_topic_name: "/tf"
+  gz_topic_name:  "/model/roadster/tf_truth"
+  ros_type_name:  "tf2_msgs/msg/TFMessage"
+  gz_type_name:   "ignition.msgs.Pose_V"
+  direction: GZ_TO_ROS
+
 # 3D ground truth, absolute world coordinates (same convention as the sedan's
 # /odom_truth - it starts at the spawn pose, not the origin)
 - ros_topic_name: "/odom_truth"

@@ -10,13 +10,13 @@ Kinds:
   ceiling  flat ground + a horizontal slab overhead (fan inverted-hold test)
   ramp     run-in road -> circular quarter-pipe arc of radius R continuing to
            `arc_deg` (180 = fully inverted) -> horizontal overhang back over
-           the run-in, so a car dropping from the overhang lands on flat road
+           the run-in, so a car flying off its end lands on flat road
 
 Ramp frame (x forward along the run-in, z up): the arc's centre is (0, R), so
 its bottom is tangent to the ground at x = 0 and an inverted car at the top
 (z = 2R) travels in -x onto the overhang. The overhang must extend far enough
-in -x that the whole car is over flat road when it lets go (x_hold <= -L/2
-minus clearance); --overhang-len defaults to 10 m for that.
+in -x for the car to stop on it, hold, then accelerate forward upside down and
+fly off its far end over flat road; --overhang-len defaults to 25 m for that.
 
 Usage:
   python3 scripts/generate_stunt_world.py --kind ceiling --height 6
@@ -203,7 +203,8 @@ def main():
     ap.add_argument('--arc-deg', type=float, default=180.0)
     ap.add_argument('--seg-deg', type=float, default=3.0, help='box-chain segment angle')
     ap.add_argument('--overlap', type=float, default=0.02, help='segment length overlap [m]')
-    ap.add_argument('--overhang-len', type=float, default=10.0)
+    ap.add_argument('--overhang-len', type=float, default=25.0,
+                    help='room to stop, hold, then drive off upside down and launch')
     ap.add_argument('--run-in', type=float, default=25.0, help='spawn distance before the ramp')
     a = ap.parse_args()
     name = a.out or f'roadster_{a.kind}'

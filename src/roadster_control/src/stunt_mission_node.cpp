@@ -5,7 +5,10 @@
 //   CLIMB          round the quarter-pipe arc at climb_speed, held on by the fan
 //   OVERHANG       upside down on the overhang: brake to a stop at hold_x
 //   HOLD_INVERTED  stationary, upside down, fan only, for hold_inverted_time
-//   ...then the flight sequence below (or stay held if release_after_hold is false)
+//   DRIVE_OFF      from standstill, still upside down, accelerate forward along
+//                  the overhang to drive_off_speed and let go near its end
+//   ...then the flight sequence below, flipping with that forward speed
+//   (or stay held if release_after_hold is false)
 // Mode "drop" (the flight half on its own): the car starts upside down under a
 // ceiling held by its fan, the same state as HOLD_INVERTED:
 //   HOLD           fan on, wait hold_time
@@ -16,7 +19,9 @@
 //   DESCENT        hold the final attitude, free fall
 //   LAND_BRAKE     once descending faster than the constant-deceleration profile,
 //                  burn to touch down at touchdown_speed
-//   LANDED         base_link on the ground and upright: everything off
+//   LANDED         base_link on the ground and upright: thrusters and fan off
+//   ROLLOUT        brake the touchdown speed away at stop_decel, keep straight
+//   STOPPED        standing on the wheels
 //   ABORT          mission timeout or tank empty while airborne
 //
 // The node is the only publisher of thruster / fan / wheel / steering commands
@@ -98,6 +103,7 @@ public:
     landing_ = std::make_unique<LandingBrake>(lp);
     landed_z_ = declare_parameter<double>("landed_z", 0.03);
     mission_timeout_ = declare_parameter<double>("mission_timeout", 40.0);
+    start_delay_ = declare_parameter<double>("start_delay", 0.0);
     lambda_ = declare_parameter<double>("alloc_lambda", 1e-4);
     w_flight_ = vec6(declare_parameter<std::vector<double>>(
         "alloc_weights_flight", {0.01, 0.01, 0.01, 1.0, 1.0, 1.0}));
@@ -111,6 +117,11 @@ public:
     hold_kx_ = declare_parameter<double>("hold_kx", 1.0);
     hold_inverted_time_ = declare_parameter<double>("hold_inverted_time", 2.0);
     release_after_hold_ = declare_parameter<bool>("release_after_hold", true);
+    drive_off_speed_ = declare_parameter<double>("drive_off_speed", 8.0);
+    drive_off_accel_ = declare_parameter<double>("drive_off_accel", 3.0);
+    drive_off_flip_delay_ = declare_parameter<double>("drive_off_flip_delay", 0.6);
+    release_margin_ = declare_parameter<double>("release_margin", 0.5);
+    wheelbase_ = declare_parameter<double>("wheelbase", 2.7);
     speed_kp_ = declare_parameter<double>("speed_kp", 2.0);
     speed_ki_ = declare_parameter<double>("speed_ki", 0.5);
     tc_k_ = declare_parameter<double>("traction_k", 0.8);
@@ -212,9 +223,14 @@ private:
     ramp_cx_ = j.at("arc_center_xz")[0];
     ramp_cz_ = j.at("arc_center_xz")[1];
     const double overhang_end = ramp_cx_ - static_cast<double>(j.at("overhang_len"));
-    if (hold_x_ < overhang_end + 2.5) {
-      RCLCPP_WARN(get_logger(), "hold_x %.2f leaves the car past the overhang end %.2f",
-        hold_x_, overhang_end);
+    // let go while the front axle (wheelbase / 2 ahead of base_link, in -x)
+    // is still release_margin short of the edge
+    release_x_ = overhang_end + wheelbase_ / 2.0 + release_margin_;
+    const double run = hold_x_ - release_x_;
+    const double v_reach = std::sqrt(2.0 * drive_off_accel_ * std::max(run, 0.0));
+    if (v_reach < drive_off_speed_) {
+      RCLCPP_WARN(get_logger(), "only %.1f m of overhang between hold_x and the release point: "
+        "the car leaves at %.1f m/s, not drive_off_speed %.1f", run, v_reach, drive_off_speed_);
     }
   }
 
@@ -264,10 +280,11 @@ private:
            state_ == "LAND_BRAKE";
   }
 
-  void startFlight(const Quat & q, double t)
+  void startFlight(const Quat & q, double t, std::optional<double> delay = std::nullopt)
   {
+    flip_delay_now_ = delay.value_or(flip_delay_);
     flip_ = std::make_unique<FlipReference>(
-      q, flip_axis_, 2.0 * M_PI * flip_turns_, t + flip_delay_, flip_duration_);
+      q, flip_axis_, 2.0 * M_PI * flip_turns_, t + flip_delay_now_, flip_duration_);
     roll_progress_ = 0.0;
     enter("RELEASE", t);
   }
@@ -298,6 +315,12 @@ private:
     if (!feed_ratio_) {
       return;  // actuation state not seen yet
     }
+    if (!first_t_) {
+      first_t_ = t;
+    }
+    if (!mission_started_ && t - *first_t_ < start_delay_) {
+      return;  // let ros2_control and the viewers come up first
+    }
     if (!mission_started_) {
       mission_started_ = true;
       t_mission0_ = t;
@@ -305,7 +328,9 @@ private:
     }
     const double ts = t - t_state0_;
     const double tm = t - t_mission0_;
-    if (state_ != "LANDED" && state_ != "ABORT" && tm > mission_timeout_) {
+    if (state_ != "ROLLOUT" && state_ != "STOPPED" && state_ != "ABORT" &&
+      tm > mission_timeout_)
+    {
       enter("ABORT", t);
     }
 
@@ -367,8 +392,41 @@ private:
       } else {
         v_ref = hold_kx_ * dist;
         if (ts >= hold_inverted_time_ && release_after_hold_) {
-          startFlight(q, t);
+          enter("DRIVE_OFF", t);
         }
+      }
+    } else if (state_ == "DRIVE_OFF") {
+      // from standstill, still upside down on the fan: accelerate forward along
+      // the overhang and let go while the front axle is still under it, so all
+      // four wheels leave together and the car flies on with this speed
+      fan = 1.0;
+      drive = true;
+      v_ref = std::min(drive_off_speed_, drive_off_accel_ * ts);
+      a_ff = v_ref < drive_off_speed_ ? drive_off_accel_ : 0.0;
+      if (p.x() <= release_x_) {
+        release_speed_ = speed_;
+        startFlight(q, t, drive_off_flip_delay_);
+      }
+    } else if (state_ == "LANDED" || state_ == "ROLLOUT" || state_ == "STOPPED") {
+      // on the wheels again: brake the touchdown speed away, keep straight
+      drive = true;
+      if (state_ == "LANDED") {
+        rollout_v0_ = std::max(speed_, 0.0);
+        enter("ROLLOUT", t);
+      }
+      if (state_ == "ROLLOUT") {
+        const double tt = t - t_state0_;
+        v_ref = std::max(rollout_v0_ - stop_decel_ * tt, 0.0);
+        a_ff = v_ref > 0.0 ? -stop_decel_ : 0.0;
+        if (v_ref <= 0.0) {
+          // braking profile done: hold this spot (a speed-only loop let the
+          // integral overshoot and creep backwards at 0.2 m/s)
+          stop_point_ = p;
+          enter("STOPPED", t);
+        }
+      }
+      if (state_ == "STOPPED") {
+        v_ref = hold_kx_ * (stop_point_ - p).dot(R.col(0));  // forward distance to it
       }
     } else if (state_ == "HOLD") {
       fan = 1.0;
@@ -379,7 +437,7 @@ private:
 
     // ---------------- flight ----------------
     if (flying()) {
-      if (state_ == "RELEASE" && t >= t_state0_ + flip_delay_) {
+      if (state_ == "RELEASE" && t >= t_state0_ + flip_delay_now_) {
         enter("FLIP", t);
       }
       if (state_ == "FLIP" && t >= flip_->endTime()) {
@@ -501,12 +559,16 @@ private:
   double flip_turns_, flip_delay_, flip_duration_;
   AttitudeGains gains_;
   std::unique_ptr<LandingBrake> landing_;
-  double landed_z_, mission_timeout_;
+  double landed_z_, mission_timeout_, start_delay_;
+  std::optional<double> first_t_;
   double lambda_;
   Vec6 w_flight_, w_brake_;
   std::unique_ptr<ThrustAllocator> alloc_;
   double climb_speed_, accel_, stop_decel_, hold_x_, hold_kx_, hold_inverted_time_;
   bool release_after_hold_;
+  double drive_off_speed_, drive_off_accel_, drive_off_flip_delay_, release_margin_, wheelbase_;
+  double release_x_ = -1e9, release_speed_ = 0.0, rollout_v0_ = 0.0, flip_delay_now_ = 0.0;
+  Vec3 stop_point_ = Vec3::Zero();
   double speed_kp_, speed_ki_, tc_k_, tire_mu_, wheel_radius_;
   double steer_k_lat_, steer_k_head_, steer_max_;
   double ramp_r_ = 0.0, ramp_cx_ = 0.0, ramp_cz_ = 0.0;

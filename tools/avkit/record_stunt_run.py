@@ -3,7 +3,7 @@
 
 Unpauses the (paused) world so recording starts at sim t = 0, then records
 /stunt/status, /odom_truth, the four wheel wrenches, /roadster/body_contact and
-/roadster/thruster_state until the mission reaches LANDED or ABORT (+ --tail
+/roadster/thruster_state until the mission reaches STOPPED or ABORT (+ --tail
 seconds) or --timeout. One JSON object per line: {"t": sim time, "topic":
 ..., ...fields}. Analyze with analyze_stunt_run.py.
 
@@ -84,7 +84,7 @@ def main():
     ap.add_argument('--world', required=True)
     ap.add_argument('--out', required=True, help='session directory')
     ap.add_argument('--timeout', type=float, default=30.0, help='[s sim]')
-    ap.add_argument('--tail', type=float, default=2.0, help='record after LANDED/ABORT [s sim]')
+    ap.add_argument('--tail', type=float, default=1.0, help='record after STOPPED/ABORT [s sim]')
     ap.add_argument('--stop-after-state', default=None,
                     help='also stop --tail s after this state is entered (e.g. HOLD_INVERTED '
                          'for a hold-only run, where the mission never lands)')
@@ -104,7 +104,7 @@ def main():
     t_end = None
     while time.monotonic() - wall0 < 30 + 10 * args.timeout:
         rclpy.spin_once(rec, timeout_sec=0.01)
-        if rec.state in ('LANDED', 'ABORT') and t_end is None:
+        if rec.state in ('STOPPED', 'ABORT') and t_end is None:
             t_end = rec.t + args.tail
         if args.stop_after_state and rec.state == args.stop_after_state and t_end is None:
             t_end = rec.t + args.stop_state_hold + args.tail

@@ -43,6 +43,8 @@ def main():
     ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
     ap.add_argument('--min-hold', type=float, default=2.0, help='inverted hold [s] (ramp)')
+    ap.add_argument('--min-release-speed', type=float, default=6.0,
+                    help='forward speed when letting go of the overhang [m/s] (ramp)')
     ap.add_argument('--min-normal', type=float, default=500.0,
                     help='per-wheel normal force while held [N] (ramp); upside down a '
                          "wheel's own weight already reads ~147 N")
@@ -143,6 +145,28 @@ def main():
             'stayed centred (< 0.2 m)': m['max_lateral_offset_m'] < 0.2,
             'no body contact on the ramp': m['body_contacts_on_ramp'] == 0,
         })
+    if ramp and t_release is not None:
+        # drive-off: speed at the moment of letting go, and the landing run
+        rel = next(s for s in status if s['t'] >= t_release)
+        m['release_speed'] = rel['speed']
+        o_rel = min(odom, key=lambda o: abs(o['t'] - t_release))
+        m['release_xyz'] = o_rel['p']
+        if 't_touchdown' in m:
+            w = [o for o in odom if m['t_touchdown'] - 0.05 <= o['t'] <= m['t_touchdown']]
+            if len(w) >= 2:
+                m['touchdown_forward_speed'] = math.dist(w[-1]['p'][:2], w[0]['p'][:2]) / (
+                    w[-1]['t'] - w[0]['t'])
+            m['flight_distance_m'] = math.dist(m['touchdown_xy'], o_rel['p'][:2])
+        stop = next((t for t, st in timeline if st == 'STOPPED'), None)
+        if stop is not None and 't_touchdown' in m:
+            o_stop = min(odom, key=lambda o: abs(o['t'] - stop))
+            m['rollout_m'] = math.dist(o_stop['p'][:2], m['touchdown_xy'])
+            m['stop_xy'] = o_stop['p'][:2]
+        checks.update({
+            f'drove off forward (>= {args.min_release_speed:.1f} m/s)':
+                m['release_speed'] >= args.min_release_speed,
+            'stopped on its wheels': stop is not None,
+        })
     if t_release is not None or not ramp:
         checks.update({
             'landed': final['state'] == 'LANDED' or any(st == 'LANDED' for _, st in timeline),
@@ -161,6 +185,8 @@ def main():
     for k in ('max_arc_angle_deg', 'max_climb_speed', 'max_lateral_offset_m',
               'min_wheel_normal_on_ramp_N', 'min_wheel_normal_held_N', 'inverted_hold_s',
               'hold_drift_m', 'hold_xyz', 'body_contacts_on_ramp', 'body_contact_on_ramp_with',
+              'release_speed', 'release_xyz', 'flight_distance_m', 'touchdown_forward_speed',
+              'rollout_m', 'stop_xy',
               'flip_rotation_deg', 'touchdown_vz', 'touchdown_tilt_deg', 'peak_vertical_accel_g',
               'impulse_used_Ns', 'gas_used_kg', 'tank_mass_end_kg', 'max_height_m',
               'body_contacts_after_release', 'body_contact_with', 't_touchdown', 'touchdown_xy'):

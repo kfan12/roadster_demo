@@ -37,6 +37,8 @@ install(TARGETS roadster_allocator stunt_mission_node
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
+# RViz markers for the demos (visual only; Python per the tooling language policy)
+install(PROGRAMS scripts/stunt_viz.py DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

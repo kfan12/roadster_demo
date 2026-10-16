@@ -26,6 +26,8 @@ def setup(context):
                  'world_json': os.path.expanduser(f'~/vlm_av_ws/maps/{cfg["world"]}.json')}
     if cfg['release_after_hold'] != '':
         overrides['release_after_hold'] = cfg['release_after_hold'].lower() == 'true'
+    if cfg['start_delay'] != '':
+        overrides['start_delay'] = float(cfg['start_delay'])
     return [Node(package='roadster_control', executable='stunt_mission_node',
                  name='stunt_mission_node', output='screen',
                  parameters=[params, overrides])]
@@ -37,5 +39,7 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value=''),
         DeclareLaunchArgument('release_after_hold', default_value='',
                               description="'' = stunt_params.yaml value"),
+        DeclareLaunchArgument('start_delay', default_value='',
+                              description="sim seconds before the mission starts; '' = yaml"),
         OpaqueFunction(function=setup),
     ])

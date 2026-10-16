@@ -25,6 +25,7 @@ stunt_mission_node:
     brake_kv: 3.0
     landed_z: 0.03               # base_link height that counts as on the ground
     mission_timeout: 40.0        # a ramp run takes ~12 s before the hold
+    start_delay: 0.0             # sim seconds after the first pose before starting
 
     # ground phase, ramp mode (geometry from world_json = maps/<world>.json)
     climb_speed: 6.0             # constant speed round the arc [m/s]
@@ -34,7 +35,14 @@ stunt_mission_node:
     hold_x: -7.0                 # where to stop, upside down: whole car over flat road
     hold_kx: 1.0                 # [1/s] position loop round the stop trajectory and the hold
     hold_inverted_time: 2.0      # plan Phase 4 exit criterion: held inverted for 2 s
-    release_after_hold: true     # false: stay held (Phase 4 test), true: flip + land
+    release_after_hold: true     # false: stay held (Phase 4 test), true: drive off, flip, land
+    # drive-off: from the stationary inverted hold, accelerate forward along the
+    # overhang (still on the fan) and fly off its end with this speed
+    drive_off_speed: 8.0         # [m/s]
+    drive_off_accel: 3.0         # [m/s^2], inside the inverted traction (~4.9 m/s^2)
+    drive_off_flip_delay: 0.6    # fall + travel clear of the overhang edge before rolling [s]
+    release_margin: 0.5          # let go with the front axle this far short of the edge [m]
+    wheelbase: 2.7               # must match roadster.urdf.xacro
     speed_kp: 2.0                # [1/s], drive force = m (kp e + ki int e) + gravity ff
     speed_ki: 0.5
     traction_k: 0.8              # wheel torque cap = k mu N r per wheel (traction control)
