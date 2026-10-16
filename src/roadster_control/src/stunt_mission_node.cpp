@@ -3,10 +3,11 @@
 // Mode "ramp" (Demo A, the inverted ramp):
 //   ACCELERATE     fan on, speed up along the run-in toward the ramp
 //   CLIMB          round the quarter-pipe arc at climb_speed, held on by the fan
-//   OVERHANG       upside down on the overhang: brake to a stop at hold_x
+//   STOP           brake (starting on the upper arc) to a stop at hold_x, just past the top
 //   HOLD_INVERTED  stationary, upside down, fan only, for hold_inverted_time
-//   DRIVE_OFF      from standstill, still upside down, accelerate forward along
-//                  the overhang to drive_off_speed and let go near its end
+//   DRIVE_OFF      from standstill, still upside down, accelerate forward (wheels
+//                  plus the rear nozzles) to drive_off_speed and let go near the
+//                  overhang's end
 //   ...then the flight sequence below, flipping with that forward speed
 //   (or stay held if release_after_hold is false)
 // Mode "drop" (the flight half on its own): the car starts upside down under a
@@ -113,12 +114,12 @@ public:
     climb_speed_ = declare_parameter<double>("climb_speed", 6.0);
     accel_ = declare_parameter<double>("accel", 2.0);
     stop_decel_ = declare_parameter<double>("stop_decel", 3.0);
-    hold_x_ = declare_parameter<double>("hold_x", -7.0);
+    hold_x_ = declare_parameter<double>("hold_x", -1.5);
     hold_kx_ = declare_parameter<double>("hold_kx", 1.0);
     hold_inverted_time_ = declare_parameter<double>("hold_inverted_time", 2.0);
     release_after_hold_ = declare_parameter<bool>("release_after_hold", true);
-    drive_off_speed_ = declare_parameter<double>("drive_off_speed", 8.0);
-    drive_off_accel_ = declare_parameter<double>("drive_off_accel", 3.0);
+    drive_off_speed_ = declare_parameter<double>("drive_off_speed", 7.0);
+    drive_off_accel_ = declare_parameter<double>("drive_off_accel", 2.5);
     drive_off_flip_delay_ = declare_parameter<double>("drive_off_flip_delay", 0.6);
     release_margin_ = declare_parameter<double>("release_margin", 0.5);
     wheelbase_ = declare_parameter<double>("wheelbase", 2.7);
@@ -204,6 +205,10 @@ private:
       g.r_com = vec3Param(n["xyz"].as<std::vector<double>>()) - com_chassis_;
       g.dir = vec3Param(n["force_dir"].as<std::vector<double>>()).normalized();
       g.f_max = n["f_max_mg"].as<double>() * mass_ * kG;
+      if (name.rfind("rear_main", 0) == 0) {
+        rear_idx_.push_back(static_cast<int>(geo.size()));
+        rear_f_max_ += g.f_max;
+      }
       geo.push_back(g);
     }
     alloc_ = std::make_unique<ThrustAllocator>(geo, mass_ * kG, mass_ * kG * 1.0);
@@ -222,16 +227,34 @@ private:
     ramp_r_ = j.at("radius");
     ramp_cx_ = j.at("arc_center_xz")[0];
     ramp_cz_ = j.at("arc_center_xz")[1];
+    arc_len_ = ramp_r_ * (static_cast<double>(j.at("arc_theta")[1]) -
+      static_cast<double>(j.at("arc_theta")[0]));
     const double overhang_end = ramp_cx_ - static_cast<double>(j.at("overhang_len"));
     // let go while the front axle (wheelbase / 2 ahead of base_link, in -x)
     // is still release_margin short of the edge
-    release_x_ = overhang_end + wheelbase_ / 2.0 + release_margin_;
-    const double run = hold_x_ - release_x_;
-    const double v_reach = std::sqrt(2.0 * drive_off_accel_ * std::max(run, 0.0));
-    if (v_reach < drive_off_speed_) {
-      RCLCPP_WARN(get_logger(), "only %.1f m of overhang between hold_x and the release point: "
-        "the car leaves at %.1f m/s, not drive_off_speed %.1f", run, v_reach, drive_off_speed_);
+    const double release_x = overhang_end + wheelbase_ / 2.0 + release_margin_;
+    s_hold_ = arc_len_ + (ramp_cx_ - hold_x_);
+    s_release_ = arc_len_ + (ramp_cx_ - release_x);
+    if (hold_x_ - wheelbase_ / 2.0 < release_x - 0.05 || hold_x_ + wheelbase_ / 2.0 > ramp_cx_) {
+      RCLCPP_WARN(get_logger(), "hold_x %.2f does not put both axles on the overhang "
+        "[%.2f, %.2f]", hold_x_, overhang_end, ramp_cx_);
     }
+    RCLCPP_INFO(get_logger(), "hold at s = %.2f m, let go at s = %.2f m (%.2f m of run-up)",
+      s_hold_, s_release_, s_release_ - s_hold_);
+  }
+
+  // distance along the track at base_link (which sits on the driving surface):
+  // run-in (< 0), the arc (0 .. arc length), then the overhang
+  double pathS(const Vec3 & p) const
+  {
+    const double dx = p.x() - ramp_cx_, dz = p.z() - ramp_cz_;
+    if (dz < 0.0 && dx < 0.0) {
+      return dx;
+    }
+    if (dz >= 0.0 && dx < 0.0) {
+      return arc_len_ - dx;
+    }
+    return std::clamp(ramp_r_ * (std::atan2(dz, dx) + M_PI / 2), 0.0, arc_len_);
   }
 
   // world-up force all nozzles could make at the current attitude (feed 1)
@@ -342,48 +365,50 @@ private:
     bool drive = false;
     double v_ref = 0.0;
     double a_ff = 0.0;  // reference acceleration along body x [m/s^2]
-    const double inverted = -R.col(2).z();  // 1 = fully upside down
     const double arc_angle = std::atan2(p.z() - ramp_cz_, p.x() - ramp_cx_) + M_PI / 2;
 
     // ---------------- ground phase (ramp mode) ----------------
+    const double s = pathS(p);  // distance along the track (run-in < 0 < arc < overhang)
     if (state_ == "ACCELERATE") {
       fan = 1.0;
       drive = true;
       v_ref = std::min(climb_speed_, accel_ * ts);
-      if (p.x() >= ramp_cx_) {
+      if (s >= 0.0) {
         enter("CLIMB", t);
       }
     } else if (state_ == "CLIMB") {
       fan = 1.0;
       drive = true;
       v_ref = climb_speed_;
-      if (inverted > 0.9 && p.x() < ramp_cx_ - 0.5) {
-        enter("OVERHANG", t);
+      // the overhang is short, so braking starts on the upper arc as soon as
+      // the remaining track equals the stopping distance
+      const double v = std::max(speed_, 0.1);
+      if (s_hold_ - s <= v * v / (2.0 * stop_decel_)) {
+        enter("STOP", t);
       }
-    } else if (state_ == "OVERHANG" || state_ == "HOLD_INVERTED") {
-      // Stop at hold_x on a constant-deceleration trajectory planned at entry
+    } else if (state_ == "STOP" || state_ == "HOLD_INVERTED") {
+      // Stop at s_hold on a constant-deceleration trajectory planned at entry
       // (track its position and speed, with its deceleration as feed-forward),
       // then hold the point with a position loop. A speed-vs-distance law
       // like min(sqrt(2 a d), k d) demands 2a at its crossover - more than
       // the traction there - so the trajectory is planned once instead.
       fan = 1.0;
       drive = true;
-      const double dist = p.x() - hold_x_;  // still to go, travelling in -x
-      if (state_ == "OVERHANG") {
+      const double dist = s_hold_ - s;  // track still to go
+      if (state_ == "STOP") {
         if (!stop_plan_) {
           const double v0 = std::max(speed_, 0.1);
-          const double d0 = std::max(dist, 0.1);
-          const double a = v0 * v0 / (2.0 * d0);
-          if (a > stop_decel_) {
+          const double a = v0 * v0 / (2.0 * std::max(dist, 0.1));
+          if (a > 1.2 * stop_decel_) {
             RCLCPP_WARN(get_logger(), "stopping at hold_x needs %.2f m/s^2 > stop_decel %.2f",
               a, stop_decel_);
           }
-          stop_plan_ = StopPlan{t, v0, a, p.x()};
+          stop_plan_ = StopPlan{t, v0, a, s};
         }
         const auto & sp = *stop_plan_;
         const double tt = std::min(t - sp.t0, sp.v0 / sp.a);
-        const double s_ref = sp.v0 * tt - 0.5 * sp.a * tt * tt;  // distance along -x
-        const double e_s = s_ref - (sp.x0 - p.x());              // > 0: behind the plan
+        const double s_ref = sp.v0 * tt - 0.5 * sp.a * tt * tt;
+        const double e_s = s_ref - (s - sp.s0);  // > 0: behind the plan
         v_ref = std::max(sp.v0 - sp.a * tt, 0.0) + hold_kx_ * e_s;
         a_ff = t - sp.t0 < sp.v0 / sp.a ? -sp.a : 0.0;
         if (std::abs(dist) < 0.01 && std::abs(speed_) < 0.02) {
@@ -396,15 +421,24 @@ private:
         }
       }
     } else if (state_ == "DRIVE_OFF") {
-      // from standstill, still upside down on the fan: accelerate forward along
-      // the overhang and let go while the front axle is still under it, so all
-      // four wheels leave together and the car flies on with this speed
+      // From standstill, still upside down on the fan: accelerate forward and
+      // let go while the front axle is still under the overhang, so all four
+      // wheels leave together and the car flies on with this speed. The short
+      // overhang leaves too little run for the tyres alone, so the two rear
+      // nozzles supply the rest (Tesla's thrusters "launched it off the ramp");
+      // the wheels track the speed trajectory, the thrust is feed-forward.
       fan = 1.0;
       drive = true;
-      v_ref = std::min(drive_off_speed_, drive_off_accel_ * ts);
-      a_ff = v_ref < drive_off_speed_ ? drive_off_accel_ : 0.0;
-      if (p.x() <= release_x_) {
+      const double run = std::max(s_release_ - s_hold_, 0.1);
+      const double a_total = drive_off_speed_ * drive_off_speed_ / (2.0 * run);
+      v_ref = std::min(drive_off_speed_, a_total * ts);
+      a_ff = v_ref < drive_off_speed_ ? a_total : 0.0;
+      const double a_thrust = std::max(a_total - drive_off_accel_, 0.0);
+      launch_u_ = v_ref < drive_off_speed_ && rear_f_max_ > 0 ?
+        std::clamp(mass_ * a_thrust / (rear_f_max_ * *feed_ratio_), 0.0, 1.0) : 0.0;
+      if (s >= s_release_) {
         release_speed_ = speed_;
+        launch_u_ = 0.0;
         startFlight(q, t, drive_off_flip_delay_);
       }
     } else if (state_ == "LANDED" || state_ == "ROLLOUT" || state_ == "STOPPED") {
@@ -495,6 +529,11 @@ private:
       a = alloc_->solve(w_des, weights, *feed_ratio_, lambda_, R);
       a.achieved.head<3>() = R * a.achieved.head<3>();  // report in the same axes
     }
+    if (state_ == "DRIVE_OFF") {
+      for (int i : rear_idx_) {
+        a.u(i) = launch_u_;  // rear thrust assist for the launch off the overhang
+      }
+    }
     ros_gz_interfaces::msg::Float32Array cmd;
     for (int i = 0; i < a.u.size(); ++i) {
       cmd.data.push_back(static_cast<float>(a.u(i)));
@@ -545,7 +584,7 @@ private:
   };
   struct StopPlan
   {
-    double t0, v0, a, x0;
+    double t0, v0, a, s0;
   };
   std::optional<StopPlan> stop_plan_;
 
@@ -567,7 +606,11 @@ private:
   double climb_speed_, accel_, stop_decel_, hold_x_, hold_kx_, hold_inverted_time_;
   bool release_after_hold_;
   double drive_off_speed_, drive_off_accel_, drive_off_flip_delay_, release_margin_, wheelbase_;
-  double release_x_ = -1e9, release_speed_ = 0.0, rollout_v0_ = 0.0, flip_delay_now_ = 0.0;
+  double release_speed_ = 0.0, rollout_v0_ = 0.0, flip_delay_now_ = 0.0;
+  double arc_len_ = 0.0, s_hold_ = 0.0, s_release_ = 0.0;
+  std::vector<int> rear_idx_;   // rear main nozzles, in allocator / command order
+  double rear_f_max_ = 0.0;     // their combined f_max at feed 1 [N]
+  double launch_u_ = 0.0;       // rear valve command during DRIVE_OFF
   Vec3 stop_point_ = Vec3::Zero();
   double speed_kp_, speed_ki_, tc_k_, tire_mu_, wheel_radius_;
   double steer_k_lat_, steer_k_head_, steer_max_;

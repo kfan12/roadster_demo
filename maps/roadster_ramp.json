@@ -1,6 +1,6 @@
 {
   "world": "roadster_ramp",
-  "generator": "generate_stunt_world.py --kind ramp --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 25.0 --run-in 25.0",
+  "generator": "generate_stunt_world.py --kind ramp --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 5.0 --run-in 25.0",
   "spawn": {
     "x": -25.0,
     "y": 0.0,
@@ -15,7 +15,7 @@
     "arc_deg": 180.0,
     "width": 5.0,
     "thickness": 0.4,
-    "overhang_len": 25.0,
+    "overhang_len": 5.0,
     "run_in": 25.0,
     "arc_center_xz": [
       0.0,
@@ -81,7 +81,7 @@
         -1
       ],
       "box_min": [
-        -25.5,
+        -5.5,
         -2.5,
         8.0
       ],

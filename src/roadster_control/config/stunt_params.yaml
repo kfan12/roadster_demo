@@ -30,16 +30,17 @@ stunt_mission_node:
     # ground phase, ramp mode (geometry from world_json = maps/<world>.json)
     climb_speed: 6.0             # constant speed round the arc [m/s]
     accel: 2.0                   # run-in acceleration [m/s^2]
-    stop_decel: 3.0              # braking to the hold point [m/s^2]: from ~5.8 m/s at the
-                                 # top this needs 5.6 m of overhang (2.0 overshot hold_x -5)
-    hold_x: -7.0                 # where to stop, upside down: whole car over flat road
+    stop_decel: 3.0              # braking to the hold point [m/s^2], measured along the track:
+                                 # from 6 m/s it starts ~6 m before hold_x, on the upper arc
+    hold_x: -1.5                 # stop just past the top: both axles on the 5 m overhang
     hold_kx: 1.0                 # [1/s] position loop round the stop trajectory and the hold
     hold_inverted_time: 2.0      # plan Phase 4 exit criterion: held inverted for 2 s
     release_after_hold: true     # false: stay held (Phase 4 test), true: drive off, flip, land
-    # drive-off: from the stationary inverted hold, accelerate forward along the
-    # overhang (still on the fan) and fly off its end with this speed
-    drive_off_speed: 8.0         # [m/s]
-    drive_off_accel: 3.0         # [m/s^2], inside the inverted traction (~4.9 m/s^2)
+    # drive-off: from the stationary inverted hold, accelerate forward (still on
+    # the fan) and fly off the overhang's end with this speed. The short overhang
+    # leaves ~1.7 m of run-up, so the rear nozzles add what the tyres cannot.
+    drive_off_speed: 7.0         # [m/s]; 8 left too little gas in regulation for the landing
+    drive_off_accel: 2.5         # [m/s^2] the tyres are counted on for; thrust adds the rest
     drive_off_flip_delay: 0.6    # fall + travel clear of the overhang edge before rolling [s]
     release_margin: 0.5          # let go with the front axle this far short of the edge [m]
     wheelbase: 2.7               # must match roadster.urdf.xacro

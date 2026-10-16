@@ -109,7 +109,7 @@ def main():
         t_end_ground = t_release if t_release is not None else status[-1]['t'] + 1
         ground = [s for s in status if s['t'] < t_end_ground]
         held = [s for s in ground if s['state'] == 'HOLD_INVERTED']
-        on_ramp = [s for s in ground if s['state'] in ('CLIMB', 'OVERHANG', 'HOLD_INVERTED')]
+        on_ramp = [s for s in ground if s['state'] in ('CLIMB', 'STOP', 'HOLD_INVERTED', 'DRIVE_OFF')]
         m['max_arc_angle_deg'] = math.degrees(max(s['arc_angle'] for s in ground))
         m['max_lateral_offset_m'] = max(abs(s['lateral_offset']) for s in ground)
         m['min_wheel_normal_on_ramp_N'] = min(
