@@ -47,7 +47,11 @@ public:
     if (!active_) {
       return 0.0;
     }
-    const double f = mass * (p_.gravity + p_.brake_accel + p_.k_v * err);
+    // the deceleration feed-forward only while really coming down: after a
+    // bounce (rising) it kept ~0.9 m g of thrust on and the car hovered at
+    // 0.9 m until the tank ran dry (drop run est_shadow3, 2026-10-16)
+    const double a_ff = v_down > 0.5 * p_.touchdown_speed ? p_.brake_accel : 0.0;
+    const double f = mass * (p_.gravity + a_ff + p_.k_v * err);
     return std::clamp(f, 0.0, f_max);
   }
 

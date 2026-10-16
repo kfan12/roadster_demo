@@ -28,7 +28,16 @@ def setup(context):
         overrides['release_after_hold'] = cfg['release_after_hold'].lower() == 'true'
     if cfg['start_delay'] != '':
         overrides['start_delay'] = float(cfg['start_delay'])
-    return [Node(package='roadster_control', executable='stunt_mission_node',
+    use_est = cfg['state'] == 'imu'
+    overrides['odom_topic'] = '/odom_est' if use_est else '/odom_truth'
+    # the IMU estimator always runs (so its error against truth can be scored);
+    # state:=imu makes the mission fly on it instead of on ground truth
+    estimator = Node(package='roadster_control', executable='state_estimator_node',
+                     name='state_estimator', output='screen',
+                     parameters=[{'use_sim_time': True,
+                                  'world_json': overrides['world_json']}])
+    return [estimator,
+            Node(package='roadster_control', executable='stunt_mission_node',
                  name='stunt_mission_node', output='screen',
                  parameters=[params, overrides])]
 
@@ -39,6 +48,9 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value=''),
         DeclareLaunchArgument('release_after_hold', default_value='',
                               description="'' = stunt_params.yaml value"),
+        DeclareLaunchArgument('state', default_value='truth',
+                              description="'truth' = /odom_truth, 'imu' = /odom_est "
+                                          '(IMU strapdown EKF)'),
         DeclareLaunchArgument('start_delay', default_value='',
                               description="sim seconds before the mission starts; '' = yaml"),
         OpaqueFunction(function=setup),

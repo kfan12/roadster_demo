@@ -23,7 +23,8 @@ stunt_mission_node:
     brake_accel: 14.7            # 1.5 g constant-deceleration profile
     touchdown_speed: 1.5         # [m/s], plan target < 3
     brake_kv: 3.0
-    landed_z: 0.03               # base_link height that counts as on the ground
+    landed_load: 0.1             # touchdown: wheel contact > this x m g while upright (F/T)
+    odom_topic: /odom_truth      # state source: /odom_truth (Gazebo) or /odom_est (IMU EKF)
     mission_timeout: 40.0        # a ramp run takes ~12 s before the hold
     start_delay: 0.0             # sim seconds after the first pose before starting
 

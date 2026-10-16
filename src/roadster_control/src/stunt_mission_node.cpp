@@ -102,7 +102,8 @@ public:
     lp.touchdown_speed = declare_parameter<double>("touchdown_speed", lp.touchdown_speed);
     lp.k_v = declare_parameter<double>("brake_kv", lp.k_v);
     landing_ = std::make_unique<LandingBrake>(lp);
-    landed_z_ = declare_parameter<double>("landed_z", 0.03);
+    landed_load_ = declare_parameter<double>("landed_load", 0.1);
+    odom_topic_ = declare_parameter<std::string>("odom_topic", "/odom_truth");
     mission_timeout_ = declare_parameter<double>("mission_timeout", 40.0);
     start_delay_ = declare_parameter<double>("start_delay", 0.0);
     lambda_ = declare_parameter<double>("alloc_lambda", 1e-4);
@@ -175,7 +176,7 @@ public:
         }
       });
     sub_odom_ = create_subscription<nav_msgs::msg::Odometry>(
-      "/odom_truth", 50, [this](nav_msgs::msg::Odometry::SharedPtr m) {onOdom(*m);});
+      odom_topic_, 50, [this](nav_msgs::msg::Odometry::SharedPtr m) {onOdom(*m);});
     RCLCPP_INFO(get_logger(), "mode '%s', %zu nozzles, mass %.1f kg, flip %.2f turns%s",
       mode_.c_str(), alloc_->size(), mass_, flip_turns_,
       mode_ == "ramp" ? (", ramp R = " + std::to_string(ramp_r_) + " m").c_str() : "");
@@ -487,7 +488,19 @@ private:
       if (landing_->active()) {
         weights = w_brake_;
       }
-      if (p.z() < landed_z_ && R.col(2).z() > std::cos(0.35)) {
+      // touchdown = wheel contact while upright (force/torque sensors; an
+      // airborne wheel reads negative), with a low estimated height as the
+      // backup. Contact, not "carrying the car's weight": the brake burn still
+      // holds ~2.5 m g at touchdown, so a 0.5 m g load threshold was missed,
+      // the car bounced and hovered on thrust (est_shadow3).
+      double load = 0.0;
+      for (std::size_t i = 0; i < 4; ++i) {
+        load += std::max(wheelNormal(i), 0.0);
+      }
+      const bool upright = R.col(2).z() > std::cos(0.35);
+      if (upright && state_ == "LAND_BRAKE" &&
+        (load > landed_load_ * mass_ * kG || h < 0.15))
+      {
         enter("LANDED", t);
       } else if (*feed_ratio_ <= 0.0) {
         enter("ABORT", t);
@@ -598,7 +611,8 @@ private:
   double flip_turns_, flip_delay_, flip_duration_;
   AttitudeGains gains_;
   std::unique_ptr<LandingBrake> landing_;
-  double landed_z_, mission_timeout_, start_delay_;
+  double landed_load_, mission_timeout_, start_delay_;
+  std::string odom_topic_;
   std::optional<double> first_t_;
   double lambda_;
   Vec6 w_flight_, w_brake_;

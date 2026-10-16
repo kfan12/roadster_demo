@@ -22,6 +22,7 @@ from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from ros_gz_interfaces.msg import Contacts, Float32Array
+from sensor_msgs.msg import Imu, JointState
 
 
 def stamp(h):
@@ -37,8 +38,15 @@ class Recorder(Node):
         self.n = 0
         self.create_subscription(StuntStatus, '/stunt/status', self._status, 100)
         self.create_subscription(Odometry, '/odom_truth', self._odom, 100)
+        # IMU state estimate (state_estimator_node), scored against the truth
+        self.create_subscription(Odometry, '/odom_est',
+                                 lambda m: self._odom(m, 'odom_est'), 100)
         self.create_subscription(Contacts, '/roadster/body_contact', self._contact, 100)
         self.create_subscription(Float32Array, '/roadster/thruster_state', self._thrust, 100)
+        # raw IMU, for offline checks of the estimator's inputs
+        self.create_subscription(Imu, '/imu', self._imu, 400)
+        # wheel encoder rates (what the IMU estimator's wheel-speed update uses)
+        self.create_subscription(JointState, '/joint_states', self._js, 100)
         for w in ('fl', 'fr', 'rl', 'rr'):
             self.create_subscription(Wrench, f'/roadster/wheel_wrench/{w}',
                                      lambda m, w=w: self._wrench(w, m), 100)
@@ -60,9 +68,9 @@ class Recorder(Node):
                     'fan_cmd': m.fan_cmd, 'wrench_des': list(m.wrench_des),
                     'wrench_alloc': list(m.wrench_alloc)})
 
-    def _odom(self, m):
+    def _odom(self, m, topic='odom'):
         p, q = m.pose.pose.position, m.pose.pose.orientation
-        self.write({'t': stamp(m.header), 'topic': 'odom', 'p': [p.x, p.y, p.z],
+        self.write({'t': stamp(m.header), 'topic': topic, 'p': [p.x, p.y, p.z],
                     'q': [q.x, q.y, q.z, q.w]})
 
     def _contact(self, m):
@@ -73,6 +81,17 @@ class Recorder(Node):
 
     def _thrust(self, m):
         self.write({'t': self.t, 'topic': 'thrust', 'f': [round(x, 1) for x in m.data]})
+
+    def _imu(self, m):
+        a, w = m.linear_acceleration, m.angular_velocity
+        self.write({'t': stamp(m.header), 'topic': 'imu', 'f': [a.x, a.y, a.z],
+                    'w': [w.x, w.y, w.z]})
+
+    def _js(self, m):
+        rates = {n: v for n, v in zip(m.name, m.velocity) if n.endswith('_wheel_joint')}
+        self.write({'t': self.t, 'topic': 'wheel_rate', 'w': [
+            rates.get(f'{a}_wheel_joint', 0.0) for a in ('front_left', 'front_right',
+                                                         'rear_left', 'rear_right')]})
 
     def _wrench(self, w, m):
         f = m.force

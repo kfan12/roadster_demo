@@ -17,6 +17,7 @@
     <depend>nlohmann-json-dev</depend>
     <depend>ros_gz_interfaces</depend>
     <depend>av_feature_msgs</depend>
+    <depend>roadster_gz_plugins</depend>
     <depend>eigen</depend>
     <depend>yaml-cpp</depend>
     <exec_depend>roadster_description</exec_depend>

@@ -43,6 +43,10 @@ def main():
     ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
     ap.add_argument('--min-hold', type=float, default=2.0, help='inverted hold [s] (ramp)')
+    ap.add_argument('--max-est-pos', type=float, default=0.5,
+                    help='IMU estimate position error vs truth, whole run [m]')
+    ap.add_argument('--max-est-att', type=float, default=3.0,
+                    help='IMU estimate attitude error vs truth, whole run [deg]')
     ap.add_argument('--min-release-speed', type=float, default=6.0,
                     help='forward speed when letting go of the overhang [m/s] (ramp)')
     ap.add_argument('--min-normal', type=float, default=500.0,
@@ -177,6 +181,43 @@ def main():
             'flip rotation': abs(m['flip_rotation_deg'] - 360 * args.turns) < args.max_rot_err_deg,
             'no body contact after release': m['body_contacts_after_release'] == 0,
         })
+    # IMU state estimate vs ground truth, per mission phase
+    est = {round(r['t'], 3): r for r in recs if r['topic'] == 'odom_est'}
+    if est:
+        phases = [(t, st) for t, st in timeline] + [(status[-1]['t'] + 1, None)]
+
+        def phase_of(t):
+            cur = None
+            for t0, st in phases:
+                if t < t0:
+                    break
+                cur = st
+            return cur
+
+        err = {}
+        for o in odom:
+            e = est.get(round(o['t'], 3))
+            if e is None:
+                continue
+            dp = math.dist(o['p'], e['p'])
+            dz = abs(o['p'][2] - e['p'][2])
+            qd = abs(sum(a * b for a, b in zip(o['q'], e['q'])))
+            dth = math.degrees(2 * math.acos(min(1.0, qd)))
+            ph = phase_of(o['t'])
+            agg = err.setdefault(ph, [0.0, 0.0, 0.0, 0])
+            agg[0] = max(agg[0], dp)
+            agg[1] = max(agg[1], dz)
+            agg[2] = max(agg[2], dth)
+            agg[3] += 1
+        m['estimate_error_by_phase'] = {
+            ph: {'max_pos_m': round(a[0], 3), 'max_height_m': round(a[1], 3),
+                 'max_att_deg': round(a[2], 2), 'samples': a[3]} for ph, a in err.items()}
+        if err:
+            m['estimate_max_pos_err_m'] = max(a[0] for a in err.values())
+            m['estimate_max_att_err_deg'] = max(a[2] for a in err.values())
+            checks[f'IMU estimate within {args.max_est_pos:.2f} m / {args.max_est_att:.1f} deg'] = (
+                m['estimate_max_pos_err_m'] < args.max_est_pos and
+                m['estimate_max_att_err_deg'] < args.max_est_att)
     m['checks'] = checks
     m['pass'] = all(checks.values())
     (sess / 'metrics.json').write_text(json.dumps(m, indent=2) + '\n')
@@ -194,6 +235,11 @@ def main():
             continue
         v = m.get(k)
         print(f'  {k:28s} {v:.3f}' if isinstance(v, float) else f'  {k:28s} {v}')
+    if 'estimate_error_by_phase' in m:
+        print('  IMU estimate error vs truth (max per phase):')
+        for ph, e in m['estimate_error_by_phase'].items():
+            print(f'    {str(ph):14s} pos {e["max_pos_m"]:.3f} m  height {e["max_height_m"]:.3f} m'
+                  f'  attitude {e["max_att_deg"]:.2f} deg')
     for k, ok in checks.items():
         print(f'  [{"PASS" if ok else "FAIL"}] {k}')
     print('RESULT: ' + ('PASS' if m['pass'] else 'FAIL'))
