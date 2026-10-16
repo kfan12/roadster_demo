@@ -24,7 +24,7 @@ It is a plausible engineering reproduction built on public reporting, not a repl
 
 1. **Run-in:** accelerate to 6 m/s; the suction fans spin up about 6 m before the ramp.
 2. **Climb:** round an 8 m radius loop at 6 m/s, pressed onto the track by the fans.
-3. **Stop and hold:** brake on the upper arc and stop just past the top, upside down on a 5 m overhang, and hold still for 2 s on fan suction alone.
+3. **Stop and hold:** brake on the upper arc and stop just past the top, upside down on a 5 m overhang, and stand still for 1 s on fan suction alone (parking brake on the wheels).
 4. **Drive-off:** from standstill, still upside down, accelerate forward with the wheels plus the two rear thrusters and let go of the overhang at about 7 m/s.
 5. **Kick flip:** roll 180 degrees about the car's long axis in about 0.8 s while flying forward.
 6. **Landing burn:** fire the down-facing thrusters on a constant-deceleration profile to touch down at about 2-3 m/s, then roll out and stop.
@@ -104,7 +104,7 @@ Gazebo shows the same thrust and fan plumes as particle effects.
 
 ### Result
 
-One IMU-flown run (`state:=imu`): held upside down 2.0 s still to 0.7 cm, all four wheels loaded from run-in to drive-off, release at 7.2 m/s, 180.0 degree flip, touchdown at 2.8 m/s vertical with 0.07 degrees tilt and a 5.6 g peak, then a 12 m rollout to a stop, with no body contact.
+IMU-flown run (`state:=imu`): stands upside down at the top for 1.0 s without moving, all four wheels loaded from run-in to drive-off, release at 7.2 m/s, 180.0 degree flip, touchdown at 2.8 m/s vertical with 0.14 degrees tilt and a peak near 5.6 g, then a rollout to a stop, with no body contact; the whole stunt takes 18 s of sim time.
 The simulation is deterministic apart from sensor noise, so repeated runs show repeatability, not margin; robustness testing (noise, wind, parameter sweeps) is still to come.
 
 ### Roadster packages

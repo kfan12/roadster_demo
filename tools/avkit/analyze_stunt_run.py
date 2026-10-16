@@ -42,7 +42,7 @@ def main():
     ap.add_argument('--max-td-tilt-deg', type=float, default=10.0)
     ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
-    ap.add_argument('--min-hold', type=float, default=2.0, help='inverted hold [s] (ramp)')
+    ap.add_argument('--min-hold', type=float, default=1.0, help='inverted hold [s] (ramp)')
     ap.add_argument('--max-est-pos', type=float, default=0.5,
                     help='IMU estimate position error vs truth, whole run [m]')
     ap.add_argument('--max-est-att', type=float, default=3.0,

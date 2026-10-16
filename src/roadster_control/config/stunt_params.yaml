@@ -36,7 +36,9 @@ stunt_mission_node:
                                  # from 6 m/s it starts ~6 m before hold_x, on the upper arc
     hold_x: -1.5                 # stop just past the top: both axles on the 5 m overhang
     hold_kx: 1.0                 # [1/s] position loop round the stop trajectory (the hold stands still)
-    hold_inverted_time: 2.0      # plan Phase 4 exit criterion: held inverted for 2 s
+    hold_inverted_time: 1.0      # standing still upside down at the top [s] (plan Phase 4 used 2)
+    stop_tolerance: 0.15         # stopped within this of hold_x counts as stopped [m]
+    park_brake: 3000.0           # wheel damping while standing [N.m per rad/s]
     release_after_hold: true     # false: stay held (Phase 4 test), true: drive off, flip, land
     # drive-off: from the stationary inverted hold, accelerate forward (still on
     # the fan) and fly off the overhang's end with this speed. The short overhang

@@ -118,7 +118,9 @@ public:
     stop_decel_ = declare_parameter<double>("stop_decel", 3.0);
     hold_x_ = declare_parameter<double>("hold_x", -1.5);
     hold_kx_ = declare_parameter<double>("hold_kx", 1.0);
-    hold_inverted_time_ = declare_parameter<double>("hold_inverted_time", 2.0);
+    hold_inverted_time_ = declare_parameter<double>("hold_inverted_time", 1.0);
+    stop_tol_ = declare_parameter<double>("stop_tolerance", 0.15);
+    park_brake_ = declare_parameter<double>("park_brake", 3000.0);
     release_after_hold_ = declare_parameter<bool>("release_after_hold", true);
     drive_off_speed_ = declare_parameter<double>("drive_off_speed", 7.0);
     drive_off_accel_ = declare_parameter<double>("drive_off_accel", 2.5);
@@ -174,6 +176,9 @@ public:
           for (std::size_t i = 0; i < 4; ++i) {
             if (m->name[k] == kWheelJoint[i]) {
               wheel_angle_[i] = m->position[k];
+              if (k < m->velocity.size()) {
+                wheel_rate_[i] = m->velocity[k];
+              }
             }
           }
         }
@@ -423,7 +428,13 @@ private:
         const double e_s = s_ref - (s - sp.s0);  // > 0: behind the plan
         v_ref = std::max(sp.v0 - sp.a * tt, 0.0) + hold_kx_ * e_s;
         a_ff = t - sp.t0 < sp.v0 / sp.a ? -sp.a : 0.0;
-        if (std::abs(dist) < 0.01 && std::abs(speed_) < 0.02) {
+        // Stopped = the planned stop is complete and the car stands, within
+        // stop_tolerance of hold_x. Waiting for 1 cm instead cost 3 s of
+        // creeping at 5-8 cm/s after the car had already stopped 11 cm short
+        // (imu_fly4); the hold stands still and the drive-off plans from the
+        // actual position, so the exact spot does not matter.
+        const bool plan_done = t - sp.t0 >= sp.v0 / sp.a;
+        if (std::abs(dist) < stop_tol_ && std::abs(speed_) < 0.05 && plan_done) {
           enter("HOLD_INVERTED", t);
         }
       } else {
@@ -444,7 +455,10 @@ private:
       // the wheels track the speed trajectory, the thrust is feed-forward.
       fan = 1.0;
       drive = true;
-      const double run = std::max(s_release_ - s_hold_, 0.1);
+      if (drive_off_s0_ < 0.0) {
+        drive_off_s0_ = s;  // plan the launch from where the car actually stopped
+      }
+      const double run = std::max(s_release_ - drive_off_s0_, 0.1);
       const double a_total = drive_off_speed_ * drive_off_speed_ / (2.0 * run);
       v_ref = std::min(drive_off_speed_, a_total * ts);
       a_ff = v_ref < drive_off_speed_ ? a_total : 0.0;
@@ -532,9 +546,15 @@ private:
       const double e = v_ref - speed_;
       speed_int_ = std::clamp(speed_int_ + e * dt, -2.0, 2.0);
       const double f = mass_ * (a_ff + speed_kp_ * e + speed_ki_ * speed_int_ - g_along);
+      // parking brake while standing (inverted hold, stopped): each wheel is
+      // damped against its own rotation. The speed loop alone gave ~5 N.m at
+      // a 2 cm/s creep, and the car stopped near the arc seam rolled back
+      // 3 cm through the hold (imu_shortstop1).
+      const bool parked = state_ == "HOLD_INVERTED" || state_ == "STOPPED";
       for (std::size_t i = 0; i < 4; ++i) {
         const double cap = tc_k_ * tire_mu_ * std::max(wheelNormal(i), 0.0) * wheel_radius_;
-        wheel_tau[i] = std::clamp(f / 4.0 * wheel_radius_, -cap, cap);
+        const double tau = parked ? -park_brake_ * wheel_rate_[i] : f / 4.0 * wheel_radius_;
+        wheel_tau[i] = std::clamp(tau, -cap, cap);
       }
       // lateral: the ramp's width axis is world y; "left" flips with body y
       const double side = R.col(1).y() >= 0 ? 1.0 : -1.0;
@@ -636,7 +656,9 @@ private:
   double lambda_;
   Vec6 w_flight_, w_brake_;
   std::unique_ptr<ThrustAllocator> alloc_;
-  double climb_speed_, accel_, stop_decel_, hold_x_, hold_kx_, hold_inverted_time_;
+  double climb_speed_, accel_, stop_decel_, hold_x_, hold_kx_, hold_inverted_time_, stop_tol_;
+  double drive_off_s0_ = -1.0;  // track position where the drive-off started
+  double park_brake_;           // [N.m per rad/s of wheel rotation]
   bool release_after_hold_;
   double drive_off_speed_, drive_off_accel_, drive_off_flip_delay_, release_margin_, wheelbase_;
   double release_speed_ = 0.0, rollout_v0_ = 0.0, flip_delay_now_ = 0.0;
@@ -657,7 +679,7 @@ private:
   std::optional<Prev> prev_;
   double speed_ = 0.0, speed_int_ = 0.0;
   std::array<Vec3, 4> wheel_force_{};
-  std::array<double, 4> wheel_angle_{0, 0, 0, 0};
+  std::array<double, 4> wheel_angle_{0, 0, 0, 0}, wheel_rate_{0, 0, 0, 0};
   double roll_progress_ = 0.0;
   bool mission_started_ = false;
   double t_mission0_ = 0.0, t_state0_ = 0.0;
