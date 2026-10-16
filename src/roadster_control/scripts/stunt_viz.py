@@ -8,12 +8,19 @@ Publishes:
   /stunt/viz        MarkerArray, 20 Hz: one arrow per cold-gas nozzle (in its
                     TF frame, pointing along the exhaust, length ~ thrust), the
                     fan suction arrow, and a text panel with the mission state
+  /stunt/viz_flow   MarkerArray, 20 Hz: the air itself - exhaust puffs launched
+                    from every firing nozzle (white) and from the fan exhaust
+                    (blue) in the world frame, growing and fading over ~0.6 s
+                    so they trail behind the car through the flip; a fan disc
+                    under the floor glowing with fan speed, and animated
+                    suction streaks converging from the surface into it
   /stunt/trail      Path of base_link in the odom (= world) frame
 
 Nothing here feeds back into control.
 """
 import json
 import math
+import random
 
 import rclpy
 import yaml
@@ -28,6 +35,24 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 G = 9.81
 CLAMP = 60.0  # draw at most this far from the origin (the ground plane is infinite)
+CHASSIS_Z = 0.33  # chassis frame above base_link (nozzles.yaml is in the chassis frame)
+FAN_MG = 1.5      # fan f_max as a multiple of m g (roadster.urdf.xacro)
+# fan exhaust vents on the rear deck (chassis frame) and their blow direction,
+# same as the Gazebo fx_fan_* emitters
+FAN_VENTS = [((-1.8, 0.5, 0.7), (-0.45, 0.0, 0.89)), ((-1.8, -0.5, 0.7), (-0.45, 0.0, 0.89))]
+PUFF_LIFE = 0.6   # [s]
+AGE_BINS = (0.15, 0.35, PUFF_LIFE)  # puffs drawn in three sizes as they grow
+AGE_SIZE = (0.25, 0.5, 0.85)        # [m]
+
+
+def quat_rot(q, v):
+    """Rotate vector v by quaternion q = (x, y, z, w)."""
+    x, y, z, w = q
+    vx, vy, vz = v
+    # t = 2 q_vec x v ; v' = v + w t + q_vec x t
+    tx, ty, tz = 2 * (y * vz - z * vy), 2 * (z * vx - x * vz), 2 * (x * vy - y * vx)
+    return (vx + w * tx + y * tz - z * ty, vy + w * ty + z * tx - x * tz,
+            vz + w * tz + x * ty - y * tx)
 
 
 def rgba(r, g, b, a=1.0):
@@ -46,8 +71,15 @@ class StuntViz(Node):
         self.mass = self.declare_parameter('mass', 1800.0).value
         # arrow length per m g of force [m]
         self.arrow_per_mg = self.declare_parameter('arrow_per_mg', 1.2).value
-        self.nozzles = sorted(yaml.safe_load(open(nozzles_file))['nozzles'])
+        geo = yaml.safe_load(open(nozzles_file))['nozzles']
+        self.nozzles = sorted(geo)
+        self.nozzle_geo = [(geo[n]['xyz'], [-c for c in geo[n]['force_dir']], geo[n]['f_max_mg'])
+                           for n in self.nozzles]  # exit point, exhaust direction, f_max
         self.thrust = [0.0] * len(self.nozzles)
+        self.puffs = []  # [x, y, z, vx, vy, vz, age, kind]
+        self.prev_odom = None
+        self.car_vel = (0.0, 0.0, 0.0)
+        self.rng = random.Random(0)
         self.fan = 0.0
         self.status = None
         self.odom = None
@@ -58,6 +90,7 @@ class StuntViz(Node):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pub_world = self.create_publisher(MarkerArray, '/stunt/viz_world', latched)
         self.pub = self.create_publisher(MarkerArray, '/stunt/viz', 10)
+        self.pub_flow = self.create_publisher(MarkerArray, '/stunt/viz_flow', 10)
         self.pub_trail = self.create_publisher(Path, '/stunt/trail', 10)
         self.create_subscription(Float32Array, '/roadster/thruster_state', self._thrust, 10)
         self.create_subscription(Float64, '/roadster/fan_force',
@@ -121,6 +154,12 @@ class StuntViz(Node):
     def _odom(self, m):
         self.odom = m
         t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        p = m.pose.pose.position
+        if self.prev_odom is not None and t - self.prev_odom[0] > 1e-4:
+            t0, p0 = self.prev_odom
+            dt = t - t0
+            self.car_vel = ((p.x - p0[0]) / dt, (p.y - p0[1]) / dt, (p.z - p0[2]) / dt)
+        self.prev_odom = (t, (p.x, p.y, p.z))
         if t - self.last_trail_t >= 0.05:
             self.last_trail_t = t
             ps = PoseStamped()
@@ -175,6 +214,113 @@ class StuntViz(Node):
             arr.markers.append(txt)
         self.pub.publish(arr)
         self.pub_trail.publish(self.trail)
+        self.pub_flow.publish(self.flow())
+
+    # ------------------------------------------------------------ air flow
+    def spawn(self, origin_ch, direction_ch, level, speed, kind, q, base):
+        """Launch puffs from a chassis-frame exit along a chassis-frame direction."""
+        o = quat_rot(q, (origin_ch[0], origin_ch[1], origin_ch[2] + CHASSIS_Z))
+        d = quat_rot(q, direction_ch)
+        n = max(1, int(round(level * 4)))
+        for _ in range(n):
+            j = [self.rng.uniform(-0.12, 0.12) for _ in range(3)]
+            s = speed * self.rng.uniform(0.8, 1.2)
+            self.puffs.append([base[0] + o[0], base[1] + o[1], base[2] + o[2],
+                               self.car_vel[0] + s * (d[0] + j[0]),
+                               self.car_vel[1] + s * (d[1] + j[1]),
+                               self.car_vel[2] + s * (d[2] + j[2]),
+                               self.rng.uniform(0.0, 0.04), kind])
+
+    def flow(self):
+        arr = MarkerArray()
+        if self.odom is None:
+            return arr
+        st = self.odom.header.stamp
+        t = st.sec + st.nanosec * 1e-9
+        dt = min(max(t - getattr(self, 'flow_t', t), 0.0), 0.2)
+        self.flow_t = t
+        mg = self.mass * G
+        p, qq = self.odom.pose.pose.position, self.odom.pose.pose.orientation
+        q = (qq.x, qq.y, qq.z, qq.w)
+        base = (p.x, p.y, p.z)
+
+        # age and move the existing puffs (exhaust slows quickly in still air)
+        drag = math.exp(-4.0 * dt)
+        for pf in self.puffs:
+            pf[3] *= drag
+            pf[4] *= drag
+            pf[5] *= drag
+            pf[0] += pf[3] * dt
+            pf[1] += pf[4] * dt
+            pf[2] += pf[5] * dt
+            pf[6] += dt
+        self.puffs = [pf for pf in self.puffs if pf[6] < PUFF_LIFE and pf[2] > -0.2]
+        if dt > 0:
+            for (xyz, exhaust, k), f in zip(self.nozzle_geo, self.thrust):
+                level = f / (k * mg) if k > 0 else 0.0
+                if level > 0.02:
+                    self.spawn(xyz, exhaust, level, 14.0 + 10.0 * level, 'gas', q, base)
+            fan_level = self.fan / (FAN_MG * mg)
+            if fan_level > 0.02:
+                for xyz, d in FAN_VENTS:
+                    self.spawn(xyz, d, fan_level, 6.0, 'fan', q, base)
+
+        # puffs: one SPHERE_LIST per (kind, age bin) so they grow as they age
+        for ki, (kind, rgb) in enumerate((('gas', (0.95, 0.95, 1.0)),
+                                          ('fan', (0.45, 0.75, 1.0)))):
+            lo = 0.0
+            for bi, (hi, size) in enumerate(zip(AGE_BINS, AGE_SIZE)):
+                m = Marker()
+                m.header.frame_id = 'odom'
+                m.ns = f'puffs_{kind}'
+                m.id = bi
+                m.type = Marker.SPHERE_LIST
+                m.pose.orientation.w = 1.0
+                m.scale.x = m.scale.y = m.scale.z = size
+                for pf in self.puffs:
+                    if pf[7] == kind and lo <= pf[6] < hi:
+                        m.points.append(pt(pf[0], pf[1], pf[2]))
+                        m.colors.append(rgba(*rgb, 0.75 * (1.0 - pf[6] / PUFF_LIFE)))
+                if not m.points:
+                    m.action = Marker.DELETE
+                arr.markers.append(m)
+                lo = hi
+
+        # fan: glowing disc under the floor + suction streaks converging into it
+        fan_level = min(self.fan / (FAN_MG * mg), 1.0)
+        disc = Marker()
+        disc.header.frame_id = 'chassis'
+        disc.ns = 'fan'
+        disc.id = 0
+        disc.type = Marker.CYLINDER
+        disc.pose.position = pt(0, 0, -0.09)
+        disc.pose.orientation.w = 1.0
+        disc.scale.x = disc.scale.y = 1.3
+        disc.scale.z = 0.03
+        disc.color = rgba(0.2, 0.55, 1.0, 0.15 + 0.8 * fan_level)
+        arr.markers.append(disc)
+        streaks = Marker()
+        streaks.header.frame_id = 'chassis'
+        streaks.ns = 'fan'
+        streaks.id = 1
+        streaks.type = Marker.LINE_LIST
+        streaks.pose.orientation.w = 1.0
+        streaks.scale.x = 0.04
+        streaks.color = rgba(0.35, 0.7, 1.0, 0.9 * fan_level)
+        if fan_level > 0.02:
+            phase = (t * 1.8) % 1.0
+            for i in range(16):
+                a = 2 * math.pi * i / 16
+                for k in range(2):
+                    s0 = (phase + 0.5 * k) % 1.0   # 1 = outer edge, 0 = disc
+                    r0, r1 = 0.65 + 1.9 * (1 - s0), 0.65 + 1.9 * max(1 - s0 - 0.18, 0.0)
+                    z0, z1 = -0.3 + 0.2 * s0, -0.3 + 0.2 * (s0 + 0.18)
+                    streaks.points += [pt(r0 * math.cos(a) * 1.6, r0 * math.sin(a), z0),
+                                       pt(r1 * math.cos(a) * 1.6, r1 * math.sin(a), z1)]
+        else:
+            streaks.action = Marker.DELETE
+        arr.markers.append(streaks)
+        return arr
 
 
 def main():

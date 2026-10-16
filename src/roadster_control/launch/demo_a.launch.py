@@ -11,9 +11,13 @@ further `start_delay` sim seconds, the car drives: run-in -> up the 8 m loop
 on fan suction -> stops upside down on the overhang -> holds 2 s -> lets go,
 kick-flips 180 deg on its cold-gas nozzles -> brake burn -> lands.
 
-RViz shows the car, the ramp (from maps/<world>.json), one orange plume arrow
-per nozzle (length ~ thrust), the blue fan-suction arrow, a state panel and
-the path trail. Generate the world first if it is missing:
+RViz shows the car, the ramp (from maps/<world>.json), one orange arrow per
+nozzle (length ~ thrust), the air flow (white exhaust puffs, blue fan exhaust,
+a fan disc glowing with fan speed and suction streaks into it), a state panel,
+the path trail, and two Gazebo-rendered camera panels: the trackside camera
+filming the stunt and the car's onboard camera (onboard_camera:=false to save
+render time). In Gazebo the nozzles and fan exhaust emit particle plumes.
+Generate the world first if it is missing:
   python3 scripts/generate_stunt_world.py --kind ramp --radius 8
 """
 import os
@@ -39,7 +43,8 @@ def setup(context):
 
     sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(desc, 'launch', 'roadster_sim.launch.py')),
-        launch_arguments={'world': world, 'gui': cfg['gui'], 'paused': 'true'}.items())
+        launch_arguments={'world': world, 'gui': cfg['gui'], 'paused': 'true',
+                          'with_camera': cfg['onboard_camera']}.items())
     mission = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(ctrl, 'launch', 'stunt_mission.launch.py')),
         launch_arguments={'mode': 'ramp', 'world': world,
@@ -72,6 +77,9 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value='roadster_ramp'),
         DeclareLaunchArgument('gui', default_value='true', description='Gazebo window'),
         DeclareLaunchArgument('rviz', default_value='true'),
+        DeclareLaunchArgument('onboard_camera', default_value='true',
+                              description="the car's front camera (shown in RViz); "
+                                          'costs real-time factor under software GL'),
         DeclareLaunchArgument('release_after_hold', default_value='true'),
         DeclareLaunchArgument('unpause_after', default_value='14.0',
                               description='wall seconds before the world is unpaused'),

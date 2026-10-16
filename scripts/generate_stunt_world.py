@@ -58,6 +58,14 @@ HEADER = """<?xml version="1.0" ?>
             name="ignition::gazebo::systems::ForceTorque"/>
     <plugin filename="ignition-gazebo-contact-system"
             name="ignition::gazebo::systems::Contact"/>
+    <!-- cameras (trackside, and the car's own with with_camera:=true) -->
+    <plugin filename="ignition-gazebo-sensors-system"
+            name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <!-- thruster plumes / fan exhaust particles, switched by the actuation system -->
+    <plugin filename="ignition-gazebo-particle-emitter2-system"
+            name="ignition::gazebo::systems::ParticleEmitter2"/>
     <gravity>0 0 -9.81</gravity>
     <!-- look from vlm_robot_public's worlds: procedural ogre2 sky (no texture
          assets; rendered fine under WSL software GL there) with a sky-blue
@@ -145,6 +153,35 @@ def box_link(name, x, y, z, pitch, sx, sy, sz, mu, rgb):
 """
 
 
+def trackside_camera(eye, target, hfov, width, height, rate):
+    """Static camera filming the stunt (topic /camera/trackside); the link's +x
+    is the viewing direction, aimed from eye at target."""
+    dx, dy, dz = (t - e for t, e in zip(target, eye))
+    yaw = math.atan2(dy, dx)
+    pitch = -math.atan2(dz, math.hypot(dx, dy))
+    return f"""    <model name="trackside_camera">
+      <static>true</static>
+      <pose>{eye[0]:.3f} {eye[1]:.3f} {eye[2]:.3f} 0 {pitch:.4f} {yaw:.4f}</pose>
+      <link name="link">
+        <visual name="body">
+          <geometry><box><size>0.3 0.2 0.2</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+        </visual>
+        <sensor name="trackside" type="camera">
+          <always_on>true</always_on>
+          <update_rate>{rate}</update_rate>
+          <topic>camera/trackside</topic>
+          <camera>
+            <horizontal_fov>{hfov}</horizontal_fov>
+            <image><width>{width}</width><height>{height}</height><format>R8G8B8</format></image>
+            <clip><near>0.5</near><far>300</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+"""
+
+
 def plane_surface(name, point, normal, box_min, box_max):
     return {'type': 'plane', 'name': name, 'point': point, 'normal': normal,
             'box_min': box_min, 'box_max': box_max}
@@ -206,6 +243,10 @@ def build_ramp(a):
     sdf = ground(300, 60, -60, 2.0)
     # run-in + landing road, painted to the ramp's width, ending at the ramp foot
     sdf += road_markings(-80.0, 0.0, W / 2)
+    # side-on camera framing run-in, loop and landing zone (x ~ -30 .. +R)
+    mid_x = (R - 30.0) / 2
+    sdf += trackside_camera(eye=(mid_x, -4.2 * R, R), target=(mid_x, 0.0, R * 0.8),
+                            hfov=1.1, width=640, height=400, rate=15)
     sdf += f'    <model name="ramp">\n      <static>true</static>\n{links}    </model>\n'
 
     big = 1e4

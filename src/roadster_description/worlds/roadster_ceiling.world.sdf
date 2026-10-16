@@ -21,6 +21,14 @@
             name="ignition::gazebo::systems::ForceTorque"/>
     <plugin filename="ignition-gazebo-contact-system"
             name="ignition::gazebo::systems::Contact"/>
+    <!-- cameras (trackside, and the car's own with with_camera:=true) -->
+    <plugin filename="ignition-gazebo-sensors-system"
+            name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <!-- thruster plumes / fan exhaust particles, switched by the actuation system -->
+    <plugin filename="ignition-gazebo-particle-emitter2-system"
+            name="ignition::gazebo::systems::ParticleEmitter2"/>
     <gravity>0 0 -9.81</gravity>
     <!-- look from vlm_robot_public's worlds: procedural ogre2 sky (no texture
          assets; rendered fine under WSL software GL there) with a sky-blue

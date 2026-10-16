@@ -32,6 +32,7 @@
 #include <ignition/gazebo/components/Pose.hh>
 #include <ignition/msgs/double.pb.h>
 #include <ignition/msgs/float_v.pb.h>
+#include <ignition/msgs/particle_emitter.pb.h>
 #include <ignition/plugin/Register.hh>
 #include <ignition/transport/Node.hh>
 #include <yaml-cpp/yaml.h>
@@ -255,6 +256,26 @@ public:
     pub_fan_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_force");
     pub_gap_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_gap");
 
+    // particle-emitter effects (roadster.urdf.xacro, with_effects): topics
+    // <prefix>/<nozzle name> and <prefix>/<fan emitter name>
+    if (auto fx = sdfChild(sdf, "effects")) {
+      fx_enabled_ = sdfGet<bool>(fx, "enabled", true);
+      fx_rate_max_ = sdfGet<double>(fx, "rate_max", fx_rate_max_);
+      fx_fan_rate_max_ = sdfGet<double>(fx, "fan_rate_max", fx_fan_rate_max_);
+      const std::string prefix = sdfGet<std::string>(fx, "topic_prefix", "/roadster/fx");
+      std::vector<std::string> names;
+      for (const auto & z : nozzles_) {
+        names.push_back(z.name);
+      }
+      names.push_back("fan_left");
+      names.push_back("fan_right");
+      for (const auto & n : names) {
+        Fx f;
+        f.pub = node_.Advertise<ignition::msgs::ParticleEmitter>(prefix + "/" + n);
+        fx_.push_back(f);
+      }
+    }
+
     ignmsg << "[roadster_actuation] model mass " << total_mass_ << " kg, " << nozzles_.size() <<
       " nozzles, tank " << tank_->mass() << " kg at " << tank_->pressure() / 1e5 << " bar ("
            << (tp.regulated ? "regulated" : "blowdown") << "), fan f_max " << fp.f_max_n <<
@@ -311,6 +332,19 @@ public:
       link_.AddWorldForce(ecm, -body_z * ff, fan_point_link - com_link_);
     }
 
+    // visual effects: particle plumes follow the actual (lagged) thrust / fan
+    if (fx_enabled_) {
+      for (std::size_t i = 0; i < nozzles_.size(); ++i) {
+        const double f = nozzles_[i].model->thrust();
+        const double fm = nozzles_[i].model->params().f_max_n;
+        updateFx(fx_[i], fm > 0 ? f / fm : 0.0, fx_rate_max_, t);
+      }
+      const double w = fan_->speed();
+      for (std::size_t k = nozzles_.size(); k < fx_.size(); ++k) {
+        updateFx(fx_[k], ff > 0 ? w * w : 0.0, fx_fan_rate_max_, t);
+      }
+    }
+
     if (t - last_state_t_ >= state_period_) {
       last_state_t_ = t;
       ignition::msgs::Float_V th;
@@ -346,6 +380,33 @@ private:
     fan_cmd_ = msg.data();
   }
 
+  struct Fx
+  {
+    ignition::transport::Node::Publisher pub;
+    bool on = false;
+    double rate = 0.0;
+    double last_t = -1.0;
+  };
+
+  // Switch a particle emitter on/off and set its rate (level 0..1 of rate_max).
+  // Publishes only on a real change, at most 20 Hz per emitter.
+  static void updateFx(Fx & fx, double level, double rate_max, double t)
+  {
+    const bool on = level > 0.02;
+    const double rate = on ? std::max(level, 0.1) * rate_max : 0.0;
+    const bool changed = on != fx.on || (on && std::abs(rate - fx.rate) > 0.15 * fx.rate);
+    if (!changed || (on == fx.on && t - fx.last_t < 0.05)) {
+      return;
+    }
+    ignition::msgs::ParticleEmitter m;
+    m.mutable_emitting()->set_data(on);
+    m.mutable_rate()->set_data(static_cast<float>(rate));
+    fx.pub.Publish(m);
+    fx.on = on;
+    fx.rate = rate;
+    fx.last_t = t;
+  }
+
   static void publishDouble(ignition::transport::Node::Publisher & p, double v)
   {
     ignition::msgs::Double m;
@@ -376,6 +437,10 @@ private:
     pub_gap_;
   double state_period_ = 0.01;
   double last_state_t_ = -1.0;
+
+  bool fx_enabled_ = false;
+  double fx_rate_max_ = 60.0, fx_fan_rate_max_ = 40.0;
+  std::vector<Fx> fx_;  // one per nozzle (same order), then the fan exhausts
 };
 
 }  // namespace roadster_gz_plugins

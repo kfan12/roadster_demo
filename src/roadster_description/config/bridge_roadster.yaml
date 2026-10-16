@@ -103,5 +103,23 @@
   gz_type_name:   "ignition.msgs.Double"
   direction: GZ_TO_ROS
 
+# ---- cameras (lazy: only converted while someone subscribes) ----
+# trackside: static camera in the generated ramp world, filming the stunt
+- ros_topic_name: "/camera/trackside/image"
+  gz_topic_name:  "/camera/trackside"
+  ros_type_name:  "sensor_msgs/msg/Image"
+  gz_type_name:   "ignition.msgs.Image"
+  direction: GZ_TO_ROS
+  lazy: true
+
+# onboard: the car's RGB-D front camera (roadster_sim.launch.py with_camera:=true),
+# same topic names as the sedan
+- ros_topic_name: "/camera/front/image_raw"
+  gz_topic_name:  "/camera/front/image"
+  ros_type_name:  "sensor_msgs/msg/Image"
+  gz_type_name:   "ignition.msgs.Image"
+  direction: GZ_TO_ROS
+  lazy: true
+
 # /roadster/body_contact is bridged by the launch file: Fortress publishes the
 # contact sensor on a world-scoped name, so it cannot live in this yaml.

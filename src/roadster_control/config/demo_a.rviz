@@ -62,6 +62,46 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
+    # the air itself: nozzle exhaust puffs (white), fan exhaust (blue), fan disc
+    # glowing with fan speed and suction streaks converging into it
+    - Class: rviz_default_plugins/MarkerArray
+      Name: air flow (exhaust, fan)
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Value: /stunt/viz_flow
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    # Gazebo-rendered views: a static camera filming the stunt from the side,
+    # and the car's own front camera (with_camera:=true)
+    - Class: rviz_default_plugins/Image
+      Name: trackside camera
+      Enabled: true
+      Topic:
+        Value: /camera/trackside/image
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Max Value: 1
+      Min Value: 0
+      Median window: 5
+      Normalize Range: true
+    - Class: rviz_default_plugins/Image
+      Name: onboard camera
+      Enabled: true
+      Topic:
+        Value: /camera/front/image_raw
+        Depth: 2
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Max Value: 1
+      Min Value: 0
+      Median window: 5
+      Normalize Range: true
     - Class: rviz_default_plugins/Path
       Name: trail (base_link)
       Enabled: true
@@ -123,7 +163,7 @@ Visualization Manager:
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 900
-  Width: 1500
+  Height: 1000
+  Width: 1800
   Hide Left Dock: false
   Hide Right Dock: true

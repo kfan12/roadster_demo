@@ -41,6 +41,8 @@
        ground plane) and the fan's spin state at spawn (1.0 lets a car spawned
        against a ceiling hold from t = 0 instead of falling during spin-up) -->
     <xacro:arg name="surfaces_file" default="" />
+    <!-- cosmetic Gazebo particle plumes on the nozzles and fan exhausts -->
+    <xacro:arg name="with_effects" default="true" />
     <xacro:arg name="fan_initial_speed" default="0.0" />
 
     <!-- ===================== PHYSICAL PARAMETERS ===================== -->
@@ -468,8 +470,67 @@
                 <max_surface_angle_deg>45</max_surface_angle_deg>
                 <initial_speed>$(arg fan_initial_speed)</initial_speed>
             </fan>
+            <!-- drive the particle emitters below (rate = level x rate_max per s) -->
+            <effects>
+                <enabled>$(arg with_effects)</enabled>
+                <rate_max>200</rate_max>
+                <fan_rate_max>120</fan_rate_max>
+                <topic_prefix>/roadster/fx</topic_prefix>
+            </effects>
         </plugin>
     </gazebo>
+
+    <!-- ===================== VISUAL EFFECTS (Gazebo particles) ===================== -->
+    <!-- Cosmetic only, no physics. One emitter per nozzle at its exit, its +X
+       along the EXHAUST (opposite force_dir), so a firing nozzle shows a white
+       cold-gas plume; two on the rear deck show the suction fans' exhaust (the
+       ducted fans pull air from under the floor and blow it out above). All
+       start off; the actuation system switches them and sets their rate from
+       the live thrust / fan speed on /roadster/fx/<name>. Needs the world to
+       load ignition-gazebo-particle-emitter2-system. Attached to base_link
+       (the root link sdformat keeps) with explicit poses, so lumping cannot
+       move them. -->
+    <xacro:macro name="fx_emitter" params="name xyz exhaust rgb">
+        <particle_emitter name="fx_${name}" type="point">
+            <pose>${xyz[0]} ${xyz[1]} ${xyz[2] + wheel_radius} 0 ${-atan2(exhaust[2], sqrt(exhaust[0]*exhaust[0] + exhaust[1]*exhaust[1]))} ${atan2(exhaust[1], exhaust[0])}</pose>
+            <emitting>false</emitting>
+            <size>0.05 0.05 0.05</size>
+            <particle_size>0.4 0.4 0.4</particle_size>
+            <lifetime>0.5</lifetime>
+            <rate>0</rate>
+            <min_velocity>10</min_velocity>
+            <max_velocity>16</max_velocity>
+            <scale_rate>3</scale_rate>
+            <color_start>${rgb} 0.9</color_start>
+            <color_end>${rgb} 0.0</color_end>
+            <topic>/roadster/fx/${name}</topic>
+            <!-- soft round puff (scripts/generate_puff_texture.py) instead of hard squares -->
+            <material>
+                <diffuse>1 1 1 1</diffuse>
+                <pbr>
+                    <metal>
+                        <albedo_map>$(find roadster_description)/models/fx/puff.png</albedo_map>
+                    </metal>
+                </pbr>
+            </material>
+        </particle_emitter>
+    </xacro:macro>
+    <xacro:macro name="fx_nozzles" params="names">
+        <xacro:if value="${len(names) > 0}">
+            <xacro:fx_emitter name="${names[0]}" xyz="${nozzles[names[0]]['xyz']}"
+                exhaust="${[-c for c in nozzles[names[0]]['force_dir']]}" rgb="0.95 0.95 1.0" />
+            <xacro:fx_nozzles names="${names[1:]}" />
+        </xacro:if>
+    </xacro:macro>
+    <xacro:if value="$(arg with_effects)">
+        <gazebo reference="base_link">
+            <xacro:fx_nozzles names="${python.sorted(nozzles.keys())}" />
+            <xacro:fx_emitter name="fan_left" xyz="${[-1.8, 0.5, 0.7]}"
+                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" />
+            <xacro:fx_emitter name="fan_right" xyz="${[-1.8, -0.5, 0.7]}"
+                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" />
+        </gazebo>
+    </xacro:if>
 
     <!-- ===================== OPTIONAL RGB-D CAMERA ===================== -->
     <!-- verbatim from sedan.urdf.xacro (424x300, hfov 1.9, 10 Hz, far 50 m);
