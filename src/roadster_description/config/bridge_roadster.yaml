@@ -1,0 +1,49 @@
+# ros_gz bridge for the roadster. Model-level topics only; stunt-actuator
+# topics (thruster_cmd, tank, fan) are added with their plugins in Phase 2/4.
+
+- ros_topic_name: "/clock"
+  gz_topic_name:  "/clock"
+  ros_type_name:  "rosgraph_msgs/msg/Clock"
+  gz_type_name:   "ignition.msgs.Clock"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/imu"
+  gz_topic_name:  "/imu"
+  ros_type_name:  "sensor_msgs/msg/Imu"
+  gz_type_name:   "ignition.msgs.IMU"
+  direction: GZ_TO_ROS
+
+# 3D ground truth, absolute world coordinates (same convention as the sedan's
+# /odom_truth - it starts at the spawn pose, not the origin)
+- ros_topic_name: "/odom_truth"
+  gz_topic_name:  "/model/roadster/odometry_truth"
+  ros_type_name:  "nav_msgs/msg/Odometry"
+  gz_type_name:   "ignition.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/wheel_wrench/fl"
+  gz_topic_name:  "/roadster/wheel_wrench/fl"
+  ros_type_name:  "geometry_msgs/msg/Wrench"
+  gz_type_name:   "ignition.msgs.Wrench"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/wheel_wrench/fr"
+  gz_topic_name:  "/roadster/wheel_wrench/fr"
+  ros_type_name:  "geometry_msgs/msg/Wrench"
+  gz_type_name:   "ignition.msgs.Wrench"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/wheel_wrench/rl"
+  gz_topic_name:  "/roadster/wheel_wrench/rl"
+  ros_type_name:  "geometry_msgs/msg/Wrench"
+  gz_type_name:   "ignition.msgs.Wrench"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/roadster/wheel_wrench/rr"
+  gz_topic_name:  "/roadster/wheel_wrench/rr"
+  ros_type_name:  "geometry_msgs/msg/Wrench"
+  gz_type_name:   "ignition.msgs.Wrench"
+  direction: GZ_TO_ROS
+
+# /roadster/body_contact is bridged by the launch file: Fortress publishes the
+# contact sensor on a world-scoped name, so it cannot live in this yaml.

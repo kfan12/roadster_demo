@@ -1,0 +1,55 @@
+<?xml version="1.0" ?>
+<!-- Minimal flat runway for roadster_description smoke tests (model loads,
+     sensors publish, ros2_control drives). Hand-written on purpose: the stunt
+     worlds (ramp, ceiling, hop row) come from scripts/generate_stunt_world.py
+     in later phases. 1 ms DART step (plan section 5.5); no sensors/rendering
+     system, so there is no camera load. -->
+<sdf version="1.8">
+  <world name="roadster_flat_test">
+    <physics name="1ms" type="dart">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system"
+            name="ignition::gazebo::systems::Physics">
+      <engine><filename>ignition-physics-dartsim-plugin</filename></engine>
+    </plugin>
+    <plugin filename="ignition-gazebo-user-commands-system"
+            name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system"
+            name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-imu-system"
+            name="ignition::gazebo::systems::Imu"/>
+    <plugin filename="ignition-gazebo-forcetorque-system"
+            name="ignition::gazebo::systems::ForceTorque"/>
+    <plugin filename="ignition-gazebo-contact-system"
+            name="ignition::gazebo::systems::Contact"/>
+
+    <gravity>0 0 -9.81</gravity>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 50 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <!-- 1 km x 60 m runway; friction is set on the tires (mu 1.2), the ground
+         gets a high mu so the tire value is the one that binds (ODE-style
+         friction combines by min). -->
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>1000 60</size></plane></geometry>
+          <surface><friction><ode><mu>2.0</mu><mu2>2.0</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>1000 60</size></plane></geometry>
+          <material><ambient>0.25 0.25 0.27 1</ambient><diffuse>0.25 0.25 0.27 1</diffuse></material>
+        </visual>
+      </link>
+      <pose>480 0 0 0 0 0</pose>
+    </model>
+  </world>
+</sdf>

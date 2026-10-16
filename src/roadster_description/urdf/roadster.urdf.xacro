@@ -1,0 +1,486 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="roadster">
+
+    <!-- Stunt roadster, derived from sedan_description/urdf/sedan.urdf.xacro
+       (docs/plans/roadster_demo_plan.md). Kept from the sedan: chassis/body
+       collision box, wheelbase/track/wheel geometry, steering-joint limits,
+       wheel-friction blob path, IMU (same noise), base_link at ground level.
+       Changed, and why:
+       - drive: the sedan's AckermannSteering plugin commands wheel joint
+         VELOCITIES (capped at 10 m/s, 4 m/s^2), so it would brake the car
+         against a thruster burst. Here gz_ros2_control drives the wheels by
+         EFFORT (all-wheel drive) and the steering joints by POSITION
+         (config/ros2_controllers.yaml); DART friction sets the traction limit.
+       - odometry: ground truth is 3D (dimensions=3) because the car flips;
+         there is no wheel odometry yet (the Ackermann plugin produced it).
+       - sensors: force/torque on every wheel joint (wheel normal force, needed
+         by the fan loop and the inverted-hold checks) and a chassis contact
+         sensor (landing impact / body scrape).
+       - nozzle frames: one fixed frame per cold-gas nozzle, placed from
+         config/nozzles.yaml (the same file the thruster plugin will read).
+       - camera: off by default (with_camera:=true restores the sedan's RGB-D
+         block verbatim); software-GL rendering cannot keep up with the 1 ms
+         stunt physics step.
+       - mass: chassis_mass is an argument; tire friction mu = 1.2 (plan
+         section 7) instead of the sedan's 1.0.
+       Thrust/fan forces are applied by the Gazebo systems of Phase 2/4, not
+       declared here. -->
+
+    <xacro:arg name="with_camera" default="false" />
+    <!-- 1730 kg chassis + 4 x 15 kg wheels + 2 x 5 kg steer links = 1,800 kg total,
+       the plan's nominal mass. The sedan stays at 300 kg "for stability"; this
+       mass was verified stable on the 1 ms DART flat-runway smoke test
+       (2026-10-16: wheel loads = sprung weight within 0.1%, traction-limited
+       0-60 in 2.30 s at both 300 and 1,800 kg). -->
+    <xacro:arg name="chassis_mass" default="1730" />
+    <xacro:arg name="tire_mu" default="1.2" />
+    <xacro:arg name="controllers_file"
+        default="$(find roadster_description)/config/ros2_controllers.yaml" />
+
+    <!-- ===================== PHYSICAL PARAMETERS ===================== -->
+    <xacro:property name="wheelbase" value="2.7" />
+    <xacro:property name="track_width" value="1.6" />
+    <xacro:property name="wheel_radius" value="0.33" />
+    <xacro:property name="wheel_width" value="0.25" />
+
+    <xacro:property name="ch_l" value="4.5" />
+    <xacro:property name="ch_w" value="1.8" />
+    <xacro:property name="ch_h" value="0.15" />
+    <xacro:property name="ch_mass" value="$(arg chassis_mass)" />
+
+    <!-- visual only: lower, wedge-like roadster shell instead of the sedan's
+       box + greenhouse. The collision box below is the sedan's, unchanged. -->
+    <xacro:property name="body_l" value="4.2" />
+    <xacro:property name="body_w" value="1.75" />
+    <xacro:property name="body_h" value="0.55" />
+    <xacro:property name="cabin_l" value="1.4" />
+    <xacro:property name="cabin_w" value="1.5" />
+    <xacro:property name="cabin_h" value="0.30" />
+
+    <xacro:property name="steer_mass" value="5.0" />
+    <xacro:property name="wheel_mass" value="15.0" />
+
+    <!-- wheel joint limits for the effort interface. velocity 200 rad/s =
+       66 m/s at r = 0.33 m, above any planned thrust speed. effort 2500 N.m
+       per wheel is above the traction limit at the heaviest planned mass
+       (mu 1.2 x 1,870 kg x g / 4 x 0.33 m ~ 1,820 N.m), so friction, not this
+       clamp, is what binds; the drive controller owns the real torque limit. -->
+    <xacro:property name="wheel_effort_max" value="2500.0" />
+    <xacro:property name="wheel_velocity_max" value="200.0" />
+
+    <!-- camera mount: identical to sedan.urdf.xacro (see the history there) -->
+    <xacro:property name="cam_x" value="2.2" />
+    <xacro:property name="cam_z" value="1.4" />
+    <xacro:property name="cam_pitch" value="0.06" />
+
+    <xacro:property name="nozzles"
+        value="${xacro.load_yaml('$(find roadster_description)/config/nozzles.yaml')['nozzles']}" />
+
+    <!-- ===================== INERTIA MACROS ===================== -->
+    <xacro:macro name="box_inertia" params="m x y z">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="${m*(y*y+z*z)/12}" ixy="0" ixz="0"
+                iyy="${m*(x*x+z*z)/12}" iyz="0"
+                izz="${m*(x*x+y*y)/12}" />
+        </inertial>
+    </xacro:macro>
+
+    <xacro:macro name="cyl_inertia" params="m r h">
+        <inertial>
+            <mass value="${m}" />
+            <inertia ixx="${m*(3*r*r+h*h)/12}" ixy="0" ixz="0"
+                iyy="${m*(3*r*r+h*h)/12}" iyz="0"
+                izz="${m*r*r/2}" />
+        </inertial>
+    </xacro:macro>
+
+    <!-- ===================== BASE LINK ===================== -->
+    <link name="base_link" />
+
+    <!-- ===================== CHASSIS ===================== -->
+    <joint name="chassis_joint" type="fixed">
+        <parent link="base_link" />
+        <child link="chassis" />
+        <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0" />
+    </joint>
+
+    <link name="chassis">
+        <!-- floor pan -->
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <box size="${ch_l} ${ch_w} ${ch_h}" />
+            </geometry>
+            <material name="anthracite">
+                <color rgba="0.18 0.18 0.18 1.0" />
+            </material>
+        </visual>
+        <!-- body shell -->
+        <visual>
+            <origin xyz="0 0 ${ch_h/2 + body_h/2}" rpy="0 0 0" />
+            <geometry>
+                <box size="${body_l} ${body_w} ${body_h}" />
+            </geometry>
+            <material name="roadster_red">
+                <color rgba="0.70 0.05 0.07 1.0" />
+            </material>
+        </visual>
+        <!-- low canopy, set back like a mid-front-engine roadster -->
+        <visual>
+            <origin xyz="-0.4 0 ${ch_h/2 + body_h + cabin_h/2}" rpy="0 0 0" />
+            <geometry>
+                <box size="${cabin_l} ${cabin_w} ${cabin_h}" />
+            </geometry>
+            <material name="glass_dark">
+                <color rgba="0.12 0.14 0.18 1.0" />
+            </material>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 ${ch_h/2 + body_h/2}" rpy="0 0 0" />
+            <geometry>
+                <box size="${ch_l} ${ch_w} ${ch_h + body_h}" />
+            </geometry>
+        </collision>
+
+        <!-- COM at the chassis frame origin (floor-pan center, 0.33 m up).
+           In the SDF, chassis is lumped into base_link, so the simulated link
+           origin is at ground level and the COM sits 0.33 m above it. The
+           thruster plugin must take torques about the point where Fortress's
+           physics system actually applies ExternalWorldWrenchCmd (link origin
+           vs COM) - a Phase 2 sign test pins this down. -->
+        <xacro:box_inertia m="${ch_mass}" x="${ch_l}" y="${ch_w}" z="${ch_h + body_h}" />
+    </link>
+
+    <!-- ===================== STEERING LINK MACRO ===================== -->
+    <xacro:macro name="steering_link" params="prefix x_off y_off">
+        <joint name="${prefix}_wheel_steering_joint" type="revolute">
+            <parent link="chassis" />
+            <child link="${prefix}_wheel_steering_link" />
+            <origin xyz="${x_off} ${y_off} 0" rpy="0 0 0" />
+            <axis xyz="0 0 1" />
+            <!-- same mechanical stop and rate as the sedan; the drive
+               controller must command less than this (sedan used 0.65 rad).
+               effort 400 -> 3000 N.m: at 1,800 kg the standstill scrub torque
+               of the line-contact cylinder tire (~ mu N w / 4 ~ 320 N.m per
+               wheel, more once it twists) stalled the joint at 400 - a +0.3
+               rad step moved 0.0001 rad; at 300 kg the same step settled in
+               0.175 s (smoke test 2026-10-16). -->
+            <limit lower="-0.80" upper="0.80" effort="3000.0" velocity="4.0" />
+            <dynamics damping="0.0" />
+        </joint>
+
+        <link name="${prefix}_wheel_steering_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <geometry>
+                    <cylinder radius="0.03" length="0.12" />
+                </geometry>
+                <material name="silver">
+                    <color rgba="0.75 0.75 0.75 1.0" />
+                </material>
+            </visual>
+            <inertial>
+                <mass value="${steer_mass}" />
+                <inertia ixx="0.01" ixy="0" ixz="0"
+                    iyy="0.01" iyz="0"
+                    izz="0.01" />
+            </inertial>
+        </link>
+    </xacro:macro>
+
+    <!-- ===================== WHEEL MACRO ===================== -->
+    <xacro:macro name="wheel" params="name parent x_off y_off z_off">
+        <joint name="${name}_joint" type="continuous">
+            <parent link="${parent}" />
+            <child link="${name}" />
+            <origin xyz="${x_off} ${y_off} ${z_off}" rpy="0 0 0" />
+            <axis xyz="0 1 0" />
+            <limit effort="${wheel_effort_max}" velocity="${wheel_velocity_max}" />
+        </joint>
+
+        <link name="${name}">
+            <visual>
+                <origin xyz="0 0 0" rpy="${pi/2} 0 0" />
+                <geometry>
+                    <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+                </geometry>
+                <material name="tyre">
+                    <color rgba="0.08 0.08 0.08 1.0" />
+                </material>
+            </visual>
+            <collision>
+                <origin xyz="0 0 0" rpy="${pi/2} 0 0" />
+                <geometry>
+                    <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+                </geometry>
+            </collision>
+            <xacro:cyl_inertia m="${wheel_mass}" r="${wheel_radius}" h="${wheel_width}" />
+        </link>
+    </xacro:macro>
+
+    <!-- ===================== INSTANTIATE ===================== -->
+    <xacro:steering_link prefix="front_left" x_off="${wheelbase/2}" y_off="${track_width/2}" />
+    <xacro:steering_link prefix="front_right" x_off="${wheelbase/2}" y_off="${-track_width/2}" />
+
+    <xacro:wheel name="front_left_wheel"
+        parent="front_left_wheel_steering_link" x_off="0" y_off="0" z_off="0" />
+    <xacro:wheel name="front_right_wheel"
+        parent="front_right_wheel_steering_link" x_off="0" y_off="0" z_off="0" />
+    <xacro:wheel name="rear_left_wheel"
+        parent="chassis" x_off="${-wheelbase/2}" y_off="${track_width/2}" z_off="0" />
+    <xacro:wheel name="rear_right_wheel"
+        parent="chassis" x_off="${-wheelbase/2}" y_off="${-track_width/2}" z_off="0" />
+
+    <!-- ===================== WHEEL FRICTION ===================== -->
+    <!-- same <gazebo reference><collision> blob path as the sedan (slip1/slip2
+       are not in sdformat's flat whitelist); slip 0 for now - the sedan's
+       slip was an EKF experiment, not a tire model. -->
+    <xacro:macro name="wheel_friction" params="link slip:=0.00">
+        <gazebo reference="${link}">
+            <collision>
+                <surface>
+                    <friction>
+                        <ode>
+                            <mu>$(arg tire_mu)</mu>
+                            <mu2>$(arg tire_mu)</mu2>
+                            <slip1>${slip}</slip1>
+                            <slip2>${slip}</slip2>
+                        </ode>
+                    </friction>
+                </surface>
+            </collision>
+        </gazebo>
+    </xacro:macro>
+    <xacro:wheel_friction link="front_left_wheel" />
+    <xacro:wheel_friction link="front_right_wheel" />
+    <xacro:wheel_friction link="rear_left_wheel" />
+    <xacro:wheel_friction link="rear_right_wheel" />
+
+    <!-- ===================== WHEEL FORCE/TORQUE SENSORS ===================== -->
+    <!-- needs the world to load ignition-gazebo-forcetorque-system. Measured in
+       the wheel (child) frame; the wheel spins about its own y, so consumers
+       take |F| or rotate by the joint angle - the normal force is the
+       component along the chassis z (or ramp normal). -->
+    <xacro:macro name="wheel_ft" params="joint short">
+        <gazebo reference="${joint}">
+            <sensor name="ft_${short}" type="force_torque">
+                <always_on>true</always_on>
+                <update_rate>200</update_rate>
+                <topic>roadster/wheel_wrench/${short}</topic>
+                <force_torque>
+                    <frame>child</frame>
+                    <measure_direction>child_to_parent</measure_direction>
+                </force_torque>
+            </sensor>
+        </gazebo>
+    </xacro:macro>
+    <xacro:wheel_ft joint="front_left_wheel_joint" short="fl" />
+    <xacro:wheel_ft joint="front_right_wheel_joint" short="fr" />
+    <xacro:wheel_ft joint="rear_left_wheel_joint" short="rl" />
+    <xacro:wheel_ft joint="rear_right_wheel_joint" short="rr" />
+
+    <!-- ===================== CHASSIS CONTACT SENSOR ===================== -->
+    <!-- needs ignition-gazebo-contact-system in the world. Any contact on the
+       body box (not the wheels) is a scrape or a bad landing. sdformat lumps
+       the fixed-jointed chassis into base_link, which renames its collision -
+       hence the lump-prefixed name (checked with `ign sdf -p`). -->
+    <gazebo reference="chassis">
+        <sensor name="body_contact" type="contact">
+            <always_on>true</always_on>
+            <update_rate>200</update_rate>
+            <!-- no <topic>: Fortress's contact system ignores it and publishes
+               on /world/<world>/model/roadster/link/base_link/sensor/
+               body_contact/contact; the launch file bridges that name to
+               /roadster/body_contact -->
+            <contact>
+                <collision>base_link_fixed_joint_lump__chassis_collision</collision>
+            </contact>
+        </sensor>
+    </gazebo>
+
+    <!-- ===================== NOZZLE FRAMES ===================== -->
+    <!-- massless fixed frames: sdformat lumps them into chassis in the SDF,
+       robot_state_publisher still publishes them as static TF for RViz.
+       Frame x axis = force direction on the car. -->
+    <xacro:macro name="nozzle_frame" params="name xyz dir">
+        <joint name="nozzle_${name}_joint" type="fixed">
+            <parent link="chassis" />
+            <child link="nozzle_${name}" />
+            <origin xyz="${xyz[0]} ${xyz[1]} ${xyz[2]}"
+                rpy="0 ${-atan2(dir[2], sqrt(dir[0]*dir[0] + dir[1]*dir[1]))} ${atan2(dir[1], dir[0])}" />
+        </joint>
+        <link name="nozzle_${name}" />
+    </xacro:macro>
+    <xacro:macro name="nozzle_frames" params="names">
+        <xacro:if value="${len(names) > 0}">
+            <xacro:nozzle_frame name="${names[0]}"
+                xyz="${nozzles[names[0]]['xyz']}" dir="${nozzles[names[0]]['force_dir']}" />
+            <xacro:nozzle_frames names="${names[1:]}" />
+        </xacro:if>
+    </xacro:macro>
+    <xacro:nozzle_frames names="${python.sorted(nozzles.keys())}" />
+
+    <!-- ===================== IMU ===================== -->
+    <joint name="imu_joint" type="fixed">
+        <parent link="chassis" />
+        <child link="imu_link" />
+        <origin xyz="0 0 0" rpy="0 0 0" />
+    </joint>
+    <link name="imu_link">
+        <inertial>
+            <mass value="0.01" />
+            <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6" />
+        </inertial>
+    </link>
+
+    <xacro:macro name="imu_axis_noise" params="axis stddev bias">
+        <xacro:element xacro:name="${axis}">
+            <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>${stddev}</stddev>
+                <bias_mean>0.0</bias_mean>
+                <bias_stddev>${bias}</bias_stddev>
+            </noise>
+        </xacro:element>
+    </xacro:macro>
+
+    <!-- same noise model as the sedan. 200 Hz (sedan: 100) for the attitude loop. -->
+    <gazebo reference="imu_link">
+        <sensor name="imu_sensor" type="imu">
+            <always_on>true</always_on>
+            <update_rate>200</update_rate>
+            <topic>imu</topic>
+            <ignition_frame_id>imu_link</ignition_frame_id>
+            <imu>
+                <angular_velocity>
+                    <xacro:imu_axis_noise axis="x" stddev="0.009" bias="0.0004" />
+                    <xacro:imu_axis_noise axis="y" stddev="0.009" bias="0.0004" />
+                    <xacro:imu_axis_noise axis="z" stddev="0.009" bias="0.0004" />
+                </angular_velocity>
+                <linear_acceleration>
+                    <xacro:imu_axis_noise axis="x" stddev="0.08" bias="0.005" />
+                    <xacro:imu_axis_noise axis="y" stddev="0.08" bias="0.005" />
+                    <xacro:imu_axis_noise axis="z" stddev="0.08" bias="0.005" />
+                </linear_acceleration>
+            </imu>
+        </sensor>
+    </gazebo>
+
+    <!-- ===================== GAZEBO: GROUND-TRUTH ODOMETRY ===================== -->
+    <gazebo>
+        <plugin filename="ignition-gazebo-odometry-publisher-system"
+            name="ignition::gazebo::systems::OdometryPublisher">
+            <dimensions>3</dimensions>
+            <odom_frame>odom</odom_frame>
+            <robot_base_frame>base_link</robot_base_frame>
+            <odom_publish_frequency>200</odom_publish_frequency>
+            <odom_topic>/model/roadster/odometry_truth</odom_topic>
+            <tf_topic>/model/roadster/tf_truth</tf_topic>
+        </plugin>
+    </gazebo>
+
+    <!-- ===================== ROS2_CONTROL ===================== -->
+    <ros2_control name="RoadsterDrive" type="system">
+        <hardware>
+            <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+        </hardware>
+        <xacro:macro name="effort_wheel" params="joint">
+            <joint name="${joint}">
+                <command_interface name="effort">
+                    <param name="min">${-wheel_effort_max}</param>
+                    <param name="max">${wheel_effort_max}</param>
+                </command_interface>
+                <state_interface name="position" />
+                <state_interface name="velocity" />
+                <state_interface name="effort" />
+            </joint>
+        </xacro:macro>
+        <xacro:macro name="position_steer" params="joint">
+            <joint name="${joint}">
+                <command_interface name="position">
+                    <param name="min">-0.75</param>
+                    <param name="max">0.75</param>
+                </command_interface>
+                <state_interface name="position" />
+                <state_interface name="velocity" />
+            </joint>
+        </xacro:macro>
+        <xacro:effort_wheel joint="front_left_wheel_joint" />
+        <xacro:effort_wheel joint="front_right_wheel_joint" />
+        <xacro:effort_wheel joint="rear_left_wheel_joint" />
+        <xacro:effort_wheel joint="rear_right_wheel_joint" />
+        <xacro:position_steer joint="front_left_wheel_steering_joint" />
+        <xacro:position_steer joint="front_right_wheel_steering_joint" />
+    </ros2_control>
+
+    <gazebo>
+        <plugin filename="libgz_ros2_control-system.so"
+            name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+            <parameters>$(arg controllers_file)</parameters>
+        </plugin>
+    </gazebo>
+
+    <!-- ===================== OPTIONAL RGB-D CAMERA ===================== -->
+    <!-- verbatim from sedan.urdf.xacro (424x300, hfov 1.9, 10 Hz, far 50 m);
+       see the sedan file for why each value is what it is. Same topic names,
+       so lane_node can run on this car on a flat world if ever needed. -->
+    <xacro:if value="$(arg with_camera)">
+        <joint name="front_camera_joint" type="fixed">
+            <parent link="chassis" />
+            <child link="front_camera_link" />
+            <origin xyz="${cam_x} 0 ${cam_z - wheel_radius}" rpy="0 ${cam_pitch} 0" />
+        </joint>
+
+        <link name="front_camera_link">
+            <visual>
+                <origin xyz="0 0 0" rpy="0 0 0" />
+                <geometry>
+                    <box size="0.05 0.12 0.05" />
+                </geometry>
+                <material name="lens">
+                    <color rgba="0.05 0.05 0.05 1.0" />
+                </material>
+            </visual>
+            <inertial>
+                <mass value="0.2" />
+                <inertia ixx="0.0001" ixy="0" ixz="0"
+                    iyy="0.0001" iyz="0"
+                    izz="0.0001" />
+            </inertial>
+        </link>
+
+        <joint name="front_camera_optical_joint" type="fixed">
+            <parent link="front_camera_link" />
+            <child link="front_camera_optical_frame" />
+            <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}" />
+        </joint>
+        <link name="front_camera_optical_frame" />
+
+        <gazebo reference="front_camera_link">
+            <sensor name="front_camera" type="rgbd_camera">
+                <always_on>true</always_on>
+                <update_rate>10</update_rate>
+                <camera>
+                    <horizontal_fov>1.9</horizontal_fov>
+                    <image>
+                        <width>424</width>
+                        <height>300</height>
+                        <format>R8G8B8</format>
+                    </image>
+                    <clip>
+                        <near>0.3</near>
+                        <far>50.0</far>
+                    </clip>
+                    <depth_camera>
+                        <output>depths</output>
+                    </depth_camera>
+                </camera>
+                <topic>camera/front</topic>
+                <ignition_frame_id>front_camera_optical_frame</ignition_frame_id>
+            </sensor>
+        </gazebo>
+    </xacro:if>
+
+</robot>

@@ -1,0 +1,33 @@
+# ros2_control for the roadster (loaded by the gz_ros2_control plugin in
+# roadster.urdf.xacro). Replaces the sedan's kinematic AckermannSteering plugin:
+# wheels take EFFORT (torque) so they free-roll under thrust and DART friction
+# sets the real traction limit; the two steering joints take POSITION.
+controller_manager:
+  ros__parameters:
+    update_rate: 200  # Hz, the stunt control-loop rate (plan section 5.6)
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    wheel_effort_controller:
+      type: effort_controllers/JointGroupEffortController
+
+    steering_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+wheel_effort_controller:
+  ros__parameters:
+    # all-wheel drive; command order = this list (FL, FR, RL, RR) [N.m]
+    joints:
+      - front_left_wheel_joint
+      - front_right_wheel_joint
+      - rear_left_wheel_joint
+      - rear_right_wheel_joint
+
+steering_position_controller:
+  ros__parameters:
+    # command order = this list (left, right) [rad]; no Ackermann geometry here,
+    # the drive controller computes per-wheel angles
+    joints:
+      - front_left_wheel_steering_joint
+      - front_right_wheel_steering_joint
