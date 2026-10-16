@@ -1,0 +1,19 @@
+# 600 x 600 m single quad, normal +Z (up), centred on the model origin. UVs run
+# 0..240 instead of 0..1 so the asphalt texture tiles every 2.5 m via the
+# renderer's default repeat addressing (an SDF <plane> has no UV-repeat
+# control). Same technique and texture as vlm_robot_public's ground_asphalt.
+# 600 m (not just the ~150 m the stunts use) so the asphalt runs out to the
+# sky's horizon haze instead of ending in a visible edge (a 200 x 80 m quad
+# showed one mid-frame in the Gazebo view, 2026-10-16).
+mtllib ground.mtl
+v -300 -300 0
+v  300 -300 0
+v  300  300 0
+v -300  300 0
+vt 0   0
+vt 240 0
+vt 240 240
+vt 0   240
+vn 0 0 1
+usemtl ground
+f 1/1/1 2/2/1 3/3/1 4/4/1

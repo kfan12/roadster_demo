@@ -59,10 +59,21 @@ HEADER = """<?xml version="1.0" ?>
     <plugin filename="ignition-gazebo-contact-system"
             name="ignition::gazebo::systems::Contact"/>
     <gravity>0 0 -9.81</gravity>
+    <!-- look from vlm_robot_public's worlds: procedural ogre2 sky (no texture
+         assets; rendered fine under WSL software GL there) with a sky-blue
+         clear colour as the fallback if a GL backend cannot draw it -->
+    <scene>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.53 0.81 0.92 1</background>
+      <shadows>true</shadows>
+      <grid>false</grid>
+      <sky></sky>
+    </scene>
     <light type="directional" name="sun">
-      <cast_shadows>false</cast_shadows>
+      <cast_shadows>true</cast_shadows>
       <pose>0 0 50 0 0 0</pose>
       <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
       <direction>-0.4 0.2 -0.9</direction>
     </light>
 """
@@ -78,6 +89,8 @@ def surface_block(mu):
 
 
 def ground(size_x, size_y, cx, mu):
+    """Collision-only ground plane plus the tiled asphalt visual
+    (roadster_description/models/ground_asphalt, 600 x 600 m, centred on cx)."""
     return f"""    <model name="ground">
       <static>true</static>
       <pose>{cx:.3f} 0 0 0 0 0</pose>
@@ -86,11 +99,33 @@ def ground(size_x, size_y, cx, mu):
           <geometry><plane><normal>0 0 1</normal><size>{size_x} {size_y}</size></plane></geometry>
           {surface_block(mu)}
         </collision>
-        <visual name="visual">
-          <geometry><plane><normal>0 0 1</normal><size>{size_x} {size_y}</size></plane></geometry>
-          <material><ambient>0.25 0.25 0.27 1</ambient><diffuse>0.25 0.25 0.27 1</diffuse></material>
-        </visual>
       </link>
+    </model>
+    <include>
+      <name>ground_asphalt</name>
+      <uri>model://ground_asphalt</uri>
+      <pose>{cx:.3f} 0 0 0 0 0</pose>
+    </include>
+"""
+
+
+def road_markings(x0, x1, half_width):
+    """Visual-only white edge lines along the run-in road (no collision, so the
+    tyres never feel them), lifted 5 mm above the asphalt against z-fighting."""
+    length, cx = x1 - x0, (x0 + x1) / 2
+    lines = ''
+    for i, y in enumerate((-half_width, half_width)):
+        lines += f"""      <visual name="edge_{i}">
+        <pose>{cx:.3f} {y:.3f} 0.005 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><box><size>{length:.3f} 0.15 0.002</size></box></geometry>
+        <material><ambient>0.85 0.85 0.85 1</ambient><diffuse>0.85 0.85 0.85 1</diffuse></material>
+      </visual>
+"""
+    return f"""    <model name="road_markings">
+      <static>true</static>
+      <link name="link">
+{lines}      </link>
     </model>
 """
 
@@ -169,6 +204,8 @@ def build_ramp(a):
     links += box_link('overhang', ocx, 0.0, ocz, pitch_o, L + a.overlap, W, t, a.mu,
                       '0.55 0.45 0.45')
     sdf = ground(300, 60, -60, 2.0)
+    # run-in + landing road, painted to the ramp's width, ending at the ramp foot
+    sdf += road_markings(-80.0, 0.0, W / 2)
     sdf += f'    <model name="ramp">\n      <static>true</static>\n{links}    </model>\n'
 
     big = 1e4

@@ -90,6 +90,11 @@ def setup(context):
         os.path.join('/opt/ros', os.environ.get('ROS_DISTRO', 'humble'), 'lib'),
         os.environ.get('IGN_GAZEBO_SYSTEM_PLUGIN_PATH', '')]))
 
+    # model:// lookup for the worlds' includes (ground_asphalt); prepend,
+    # keeping anything already set
+    resource_path = os.pathsep.join(filter(None, [
+        os.path.join(pkg, 'models'), os.environ.get('IGN_GAZEBO_RESOURCE_PATH', '')]))
+
     # Fortress's contact system ignores the sensor's <topic> and publishes on
     # the scoped default name, which embeds the world - bridged as a separate
     # positional-arg node (a positional arg on the config_file node silently
@@ -106,7 +111,8 @@ def setup(context):
     return [
         ExecuteProcess(cmd=gz_cmd,
                        additional_env={'LIBGL_ALWAYS_SOFTWARE': '1',
-                                       'IGN_GAZEBO_SYSTEM_PLUGIN_PATH': plugin_path},
+                                       'IGN_GAZEBO_SYSTEM_PLUGIN_PATH': plugin_path,
+                                       'IGN_GAZEBO_RESOURCE_PATH': resource_path},
                        output='screen'),
 
         Node(package='robot_state_publisher', executable='robot_state_publisher',
