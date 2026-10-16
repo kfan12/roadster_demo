@@ -27,12 +27,13 @@
        declared here. -->
 
     <xacro:arg name="with_camera" default="false" />
-    <!-- 1730 kg chassis + 4 x 15 kg wheels + 2 x 5 kg steer links = 1,800 kg total,
+    <!-- 1690 kg chassis + 4 x 10 kg suspension links + 4 x 15 kg wheels + 2 x 5 kg
+       steer links = 1,800 kg total (1730 before the suspension was added),
        the plan's nominal mass. The sedan stays at 300 kg "for stability"; this
        mass was verified stable on the 1 ms DART flat-runway smoke test
        (2026-10-16: wheel loads = sprung weight within 0.1%, traction-limited
        0-60 in 2.30 s at both 300 and 1,800 kg). -->
-    <xacro:arg name="chassis_mass" default="1730" />
+    <xacro:arg name="chassis_mass" default="1690" />
     <xacro:arg name="tire_mu" default="1.2" />
     <xacro:arg name="controllers_file"
         default="$(find roadster_description)/config/ros2_controllers.yaml" />
@@ -161,12 +162,54 @@
         <xacro:box_inertia m="${ch_mass}" x="${ch_l}" y="${ch_w}" z="${ch_h + body_h}" />
     </link>
 
+    <!-- ===================== SUSPENSION MACRO ===================== -->
+    <!-- One vertical spring-damper per corner (prismatic, +z = the wheel moves
+       up relative to the chassis = compression). Without it the rigid car on
+       four rigid wheels is statically indeterminate: the physics engine can put
+       all the load on one diagonal, and did - traction control then had only two
+       driven wheels and the climb sagged from 6 to 2.4 m/s (IMU-flown run
+       imu_fly1, 2026-10-16); touchdown also peaked at 8-11 g.
+       Sized for stunt loads, not road loads: ~4-5 g at the ramp bottom (fan +
+       centripetal) means ~20 kN per corner, so k = 250 kN/m (~8 cm there) with
+       +-0.12 m travel, damping at zeta ~0.5 on a corner's sprung mass.
+       PRELOADED: at q = 0 each spring pushes with the quarter-chassis weight,
+       so at rest (1 g) the joints sit at 0, keeping base_link at ground level
+       and the chassis frame wheel_radius above it - constants the mission,
+       estimator, analyzer and tests rely on.
+       The spring-damper force is applied by the actuation system (JointForceCmd
+       every physics step, <suspension> in its plugin block below): an SDF joint
+       spring in this Fortress / DART build gave static deflections that did not
+       scale with k (the implied corner load went from 5.9 to 6.5 kN between
+       k = 250 and 500 kN/m), so it could not be trusted. -->
+    <xacro:property name="susp_k" value="250000.0" />
+    <xacro:property name="susp_travel" value="0.12" />
+    <xacro:property name="susp_mass" value="10.0" />
+    <!-- each spring carries a quarter of the chassis (steer links and wheels hang below it) -->
+    <xacro:property name="susp_preload" value="${ch_mass * 9.81 / 4.0}" />
+    <xacro:property name="susp_damping" value="${2.0 * 0.5 * sqrt(susp_k * ch_mass / 4.0)}" />
+    <xacro:macro name="suspension" params="prefix x_off y_off">
+        <joint name="${prefix}_suspension_joint" type="prismatic">
+            <parent link="chassis" />
+            <child link="${prefix}_suspension_link" />
+            <origin xyz="${x_off} ${y_off} 0" rpy="0 0 0" />
+            <axis xyz="0 0 1" />
+            <limit lower="${-susp_travel}" upper="${susp_travel}" effort="100000.0" velocity="10.0" />
+            <dynamics damping="0.0" />
+        </joint>
+        <link name="${prefix}_suspension_link">
+            <inertial>
+                <mass value="${susp_mass}" />
+                <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.05" />
+            </inertial>
+        </link>
+    </xacro:macro>
+
     <!-- ===================== STEERING LINK MACRO ===================== -->
     <xacro:macro name="steering_link" params="prefix x_off y_off">
         <joint name="${prefix}_wheel_steering_joint" type="revolute">
-            <parent link="chassis" />
+            <parent link="${prefix}_suspension_link" />
             <child link="${prefix}_wheel_steering_link" />
-            <origin xyz="${x_off} ${y_off} 0" rpy="0 0 0" />
+            <origin xyz="0 0 0" rpy="0 0 0" />
             <axis xyz="0 0 1" />
             <!-- same mechanical stop and rate as the sedan; the drive
                controller must command less than this (sedan used 0.65 rad).
@@ -229,6 +272,10 @@
     </xacro:macro>
 
     <!-- ===================== INSTANTIATE ===================== -->
+    <xacro:suspension prefix="front_left" x_off="${wheelbase/2}" y_off="${track_width/2}" />
+    <xacro:suspension prefix="front_right" x_off="${wheelbase/2}" y_off="${-track_width/2}" />
+    <xacro:suspension prefix="rear_left" x_off="${-wheelbase/2}" y_off="${track_width/2}" />
+    <xacro:suspension prefix="rear_right" x_off="${-wheelbase/2}" y_off="${-track_width/2}" />
     <xacro:steering_link prefix="front_left" x_off="${wheelbase/2}" y_off="${track_width/2}" />
     <xacro:steering_link prefix="front_right" x_off="${wheelbase/2}" y_off="${-track_width/2}" />
 
@@ -237,9 +284,9 @@
     <xacro:wheel name="front_right_wheel"
         parent="front_right_wheel_steering_link" x_off="0" y_off="0" z_off="0" />
     <xacro:wheel name="rear_left_wheel"
-        parent="chassis" x_off="${-wheelbase/2}" y_off="${track_width/2}" z_off="0" />
+        parent="rear_left_suspension_link" x_off="0" y_off="0" z_off="0" />
     <xacro:wheel name="rear_right_wheel"
-        parent="chassis" x_off="${-wheelbase/2}" y_off="${-track_width/2}" z_off="0" />
+        parent="rear_right_suspension_link" x_off="0" y_off="0" z_off="0" />
 
     <!-- ===================== WHEEL FRICTION ===================== -->
     <!-- same <gazebo reference><collision> blob path as the sedan (slip1/slip2
@@ -354,11 +401,16 @@
         </xacro:element>
     </xacro:macro>
 
-    <!-- same noise model as the sedan. 200 Hz (sedan: 100) for the attitude loop. -->
+    <!-- same noise model as the sedan. 1 kHz = the physics step (sedan: 100 Hz):
+       the rigid wheels on the box-chain ramp take ~1 ms contact impulses (up to
+       150 m/s^2) at every facet joint; sampled at 200 Hz an instantaneous IMU
+       aliases them (a 1 ms spike integrated over 5 ms), which drove the IMU
+       state estimate off by metres on the climb. A real IMU low-pass filters
+       before sampling; sampling every physics step is the simulated equivalent. -->
     <gazebo reference="imu_link">
         <sensor name="imu_sensor" type="imu">
             <always_on>true</always_on>
-            <update_rate>200</update_rate>
+            <update_rate>1000</update_rate>
             <topic>imu</topic>
             <ignition_frame_id>imu_link</ignition_frame_id>
             <imu>
@@ -421,6 +473,19 @@
         <xacro:effort_wheel joint="rear_right_wheel_joint" />
         <xacro:position_steer joint="front_left_wheel_steering_joint" />
         <xacro:position_steer joint="front_right_wheel_steering_joint" />
+        <!-- suspension: passive springs, state only (joint_state_broadcaster
+           publishes them so robot_state_publisher can place the wheels, and the
+           state estimator reads the travel for its wheel-centre lever) -->
+        <xacro:macro name="passive_joint" params="joint">
+            <joint name="${joint}">
+                <state_interface name="position" />
+                <state_interface name="velocity" />
+            </joint>
+        </xacro:macro>
+        <xacro:passive_joint joint="front_left_suspension_joint" />
+        <xacro:passive_joint joint="front_right_suspension_joint" />
+        <xacro:passive_joint joint="rear_left_suspension_joint" />
+        <xacro:passive_joint joint="rear_right_suspension_joint" />
     </ros2_control>
 
     <gazebo>
@@ -470,6 +535,15 @@
                 <max_surface_angle_deg>45</max_surface_angle_deg>
                 <initial_speed>$(arg fan_initial_speed)</initial_speed>
             </fan>
+            <!-- suspension spring-dampers (see the SUSPENSION MACRO comment):
+               joint force = -(preload + k q + c dq/dt) -->
+            <suspension>
+                <joints>front_left_suspension_joint front_right_suspension_joint
+                    rear_left_suspension_joint rear_right_suspension_joint</joints>
+                <stiffness>${susp_k}</stiffness>
+                <damping>${susp_damping}</damping>
+                <preload>${susp_preload}</preload>
+            </suspension>
             <!-- drive the particle emitters below (rate = level x rate_max per s) -->
             <effects>
                 <enabled>$(arg with_effects)</enabled>

@@ -113,7 +113,10 @@ def main():
         t_end_ground = t_release if t_release is not None else status[-1]['t'] + 1
         ground = [s for s in status if s['t'] < t_end_ground]
         held = [s for s in ground if s['state'] == 'HOLD_INVERTED']
-        on_ramp = [s for s in ground if s['state'] in ('CLIMB', 'STOP', 'HOLD_INVERTED', 'DRIVE_OFF')]
+        # wheel loads from the run-in on (past the first 0.5 s of spawn settling):
+        # a wheel off the road there is where the rigid car's diagonal began
+        on_ramp = [s for s in ground if s['state'] in ('CLIMB', 'STOP', 'HOLD_INVERTED', 'DRIVE_OFF')
+                   or (s['state'] == 'ACCELERATE' and s['t'] > 0.5)]
         m['max_arc_angle_deg'] = math.degrees(max(s['arc_angle'] for s in ground))
         m['max_lateral_offset_m'] = max(abs(s['lateral_offset']) for s in ground)
         m['min_wheel_normal_on_ramp_N'] = min(
@@ -146,6 +149,8 @@ def main():
                 math.radians(5)),
             'held still (< 2 cm)': m.get('hold_drift_m', 1e9) < 0.02,
             'wheels loaded while held': (m['min_wheel_normal_held_N'] or 0) > args.min_normal,
+            'all wheels on the track (run-in to drive-off)':
+                (m['min_wheel_normal_on_ramp_N'] or 0) > 0,
             'stayed centred (< 0.2 m)': m['max_lateral_offset_m'] < 0.2,
             'no body contact on the ramp': m['body_contacts_on_ramp'] == 0,
         })

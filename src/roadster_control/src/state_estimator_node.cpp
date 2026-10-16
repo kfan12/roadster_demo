@@ -14,7 +14,8 @@
 // The IMU's orientation field is ignored (Gazebo fills it with ground truth).
 //
 // Publishes /odom_est (nav_msgs/Odometry, frame odom = world, child base_link,
-// same convention as /odom_truth, twist in the child frame) at the IMU rate.
+// same convention as /odom_truth, twist in the child frame) at publish_rate
+// (200 Hz); the filter itself integrates every 1 kHz IMU sample.
 #include <geometry_msgs/msg/wrench.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -42,6 +43,9 @@ const std::array<const char *, 4> kWheelShort{"fl", "fr", "rl", "rr"};
 const std::array<const char *, 4> kWheelJoint{
   "front_left_wheel_joint", "front_right_wheel_joint", "rear_left_wheel_joint",
   "rear_right_wheel_joint"};
+const std::array<const char *, 4> kSuspJoint{
+  "front_left_suspension_joint", "front_right_suspension_joint", "rear_left_suspension_joint",
+  "rear_right_suspension_joint"};
 }  // namespace
 
 class StateEstimatorNode : public rclcpp::Node
@@ -71,6 +75,7 @@ public:
     use_surface_ = declare_parameter<bool>("use_surface", true);
     static_time_ = declare_parameter<double>("static_time", 0.3);
     max_reject_time_ = declare_parameter<double>("max_reject_time", 0.2);
+    publish_rate_ = declare_parameter<double>("publish_rate", 200.0);
     InsNoise n;
     n.accel = declare_parameter<double>("noise_accel", n.accel);
     n.gyro = declare_parameter<double>("noise_gyro", n.gyro);
@@ -104,13 +109,15 @@ public:
             if (m->name[k] == kWheelJoint[i]) {
               if (k < m->position.size()) {wheel_angle_[i] = m->position[k];}
               if (k < m->velocity.size()) {wheel_rate_[i] = m->velocity[k];}
+            } else if (m->name[k] == kSuspJoint[i] && k < m->position.size()) {
+              susp_[i] = m->position[k];  // +: wheel up relative to the chassis
             }
           }
         }
         have_js_ = true;
       });
     sub_imu_ = create_subscription<sensor_msgs::msg::Imu>(
-      "/imu", 200, [this](sensor_msgs::msg::Imu::SharedPtr m) {onImu(*m);});
+      "/imu", 1000, [this](sensor_msgs::msg::Imu::SharedPtr m) {onImu(*m);});
     RCLCPP_INFO(get_logger(), "IMU state estimator: start (%.2f %.2f %.2f), %zu planes + %zu arcs",
       spawn_p_.x(), spawn_p_.y(), spawn_p_.z(), surfaces_.planes.size(), surfaces_.arcs.size());
   }
@@ -193,12 +200,15 @@ private:
               continue;
             }
             const auto R = ekf_.q().toRotationMatrix();
-            const InsEkf::Vec3 pc = ekf_.p() + R * wheel_pos_[i];
+            // wheel centre moves with the suspension travel (up to ~8 cm on the
+            // climb; ignoring it would bias height and pitch)
+            const InsEkf::Vec3 wc = wheel_pos_[i] + InsEkf::Vec3(0, 0, susp_[i]);
+            const InsEkf::Vec3 pc = ekf_.p() + R * wc;
             const InsEkf::Vec3 bz = R.col(2);
             const auto g = surfaces_.gap({pc.x(), pc.y(), pc.z()}, {bz.x(), bz.y(), bz.z()}, 0.6);
             if (std::isfinite(g.h) && std::abs(g.h - wheel_radius_) < 1.0) {
               ekf_.updateSurface(g.h - wheel_radius_,
-                InsEkf::Vec3(g.normal.x, g.normal.y, g.normal.z), wheel_pos_[i], sig_surface_);
+                InsEkf::Vec3(g.normal.x, g.normal.y, g.normal.z), wc, sig_surface_);
             }
           }
         }
@@ -221,6 +231,15 @@ private:
       }
     }
 
+    // integrate every IMU sample (1 kHz), publish at publish_rate: the mission
+    // runs its control and allocation on every pose it receives
+    // on the publish_rate grid (sim time multiples of 1/rate, like the other
+    // 200 Hz sim topics) so estimate and truth samples line up
+    const long slot = std::lround(std::floor(t * publish_rate_ + 1e-6));
+    if (slot == last_slot_) {
+      return;
+    }
+    last_slot_ = slot;
     const auto R = ekf_.q().toRotationMatrix();
     const InsEkf::Vec3 pb = ekf_.p() + R * lever;
     const InsEkf::Vec3 wb = w - ekf_.bg();
@@ -267,9 +286,12 @@ private:
   double sig_wheel_, sig_nhc_, sig_surface_, sig_zupt_, sig_grav_, sig_zaru_;
   bool use_wheel_, use_nhc_, use_surface_;
   double static_time_, quiet_since_ = 0.0, max_reject_time_, velocity_ok_since_ = 0.0;
+  double publish_rate_;
+  long last_slot_ = -1;
   unsigned long last_rejected_ = 0;
   double last_reject_log_ = -10.0;
   std::array<InsEkf::Vec3, 4> wheel_pos_;
+  std::array<double, 4> susp_{0, 0, 0, 0};
   std::optional<double> t_prev_;
   double t_update_ = -1.0;
   bool have_js_ = false;

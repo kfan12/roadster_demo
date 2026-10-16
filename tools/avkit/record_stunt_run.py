@@ -102,7 +102,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--world', required=True)
     ap.add_argument('--out', required=True, help='session directory')
-    ap.add_argument('--timeout', type=float, default=30.0, help='[s sim]')
+    ap.add_argument('--timeout', type=float, default=45.0, help='[s sim]')
     ap.add_argument('--tail', type=float, default=1.0, help='record after STOPPED/ABORT [s sim]')
     ap.add_argument('--stop-after-state', default=None,
                     help='also stop --tail s after this state is entered (e.g. HOLD_INVERTED '

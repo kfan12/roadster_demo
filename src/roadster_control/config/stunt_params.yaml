@@ -7,7 +7,7 @@ stunt_mission_node:
     # the chassis frame, inertia about the COM
     mass: 1800.01
     com_chassis: [0.0075, 0.0, 0.0]
-    inertia_diag: [584.5, 3119.5, 3562.0]
+    inertia_diag: [597.9, 3123.4, 3582.4]   # with the suspension links (2026-10-16)
     chassis_offset_z: 0.33       # chassis frame above base_link (wheel radius)
     landed_com_height: 0.33      # COM height when standing on the ground
 
@@ -25,6 +25,7 @@ stunt_mission_node:
     brake_kv: 3.0
     landed_load: 0.1             # touchdown: wheel contact > this x m g while upright (F/T)
     odom_topic: /odom_truth      # state source: /odom_truth (Gazebo) or /odom_est (IMU EKF)
+    use_odom_twist: false        # speed from the odometry twist (set for /odom_est)
     mission_timeout: 40.0        # a ramp run takes ~12 s before the hold
     start_delay: 0.0             # sim seconds after the first pose before starting
 
@@ -34,7 +35,7 @@ stunt_mission_node:
     stop_decel: 3.0              # braking to the hold point [m/s^2], measured along the track:
                                  # from 6 m/s it starts ~6 m before hold_x, on the upper arc
     hold_x: -1.5                 # stop just past the top: both axles on the 5 m overhang
-    hold_kx: 1.0                 # [1/s] position loop round the stop trajectory and the hold
+    hold_kx: 1.0                 # [1/s] position loop round the stop trajectory (the hold stands still)
     hold_inverted_time: 2.0      # plan Phase 4 exit criterion: held inverted for 2 s
     release_after_hold: true     # false: stay held (Phase 4 test), true: drive off, flip, land
     # drive-off: from the stationary inverted hold, accelerate forward (still on
@@ -53,6 +54,8 @@ stunt_mission_node:
     steer_k_lat: 0.3             # [rad/m] lateral offset across the ramp
     steer_k_head: 1.0            # [rad/rad] heading error
     steer_max: 0.3               # [rad]
+    steer_enable: false          # straight track, no disturbance: hold the wheels straight
+    fan_spinup_distance: 6.0     # start the fans this far before the ramp (~1 s) [m]
 
     alloc_lambda: 1.0e-4         # valve-opening penalty (saves gas)
     # [Fx(world) Fy(world) Fz(world) Tx Ty Tz(body)] priorities. Flight: torque first,

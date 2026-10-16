@@ -83,7 +83,7 @@ public:
     mode_ = declare_parameter<std::string>("mode", "drop");
     mass_ = declare_parameter<double>("mass", 1800.01);
     inertia_ = vec3Param(declare_parameter<std::vector<double>>(
-        "inertia_diag", {584.5, 3119.5, 3562.0})).asDiagonal();
+        "inertia_diag", {597.9, 3123.4, 3582.4})).asDiagonal();
     com_chassis_ = vec3Param(declare_parameter<std::vector<double>>(
         "com_chassis", {0.0075, 0.0, 0.0}));
     chassis_z_ = declare_parameter<double>("chassis_offset_z", 0.33);
@@ -104,6 +104,7 @@ public:
     landing_ = std::make_unique<LandingBrake>(lp);
     landed_load_ = declare_parameter<double>("landed_load", 0.1);
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/odom_truth");
+    use_odom_twist_ = declare_parameter<bool>("use_odom_twist", false);
     mission_timeout_ = declare_parameter<double>("mission_timeout", 40.0);
     start_delay_ = declare_parameter<double>("start_delay", 0.0);
     lambda_ = declare_parameter<double>("alloc_lambda", 1e-4);
@@ -132,6 +133,8 @@ public:
     steer_k_lat_ = declare_parameter<double>("steer_k_lat", 0.3);
     steer_k_head_ = declare_parameter<double>("steer_k_head", 1.0);
     steer_max_ = declare_parameter<double>("steer_max", 0.3);
+    steer_enable_ = declare_parameter<bool>("steer_enable", false);
+    fan_lead_ = declare_parameter<double>("fan_spinup_distance", 6.0);
 
     loadNozzles(declare_parameter<std::string>("nozzles_file", ""));
     const std::string world_json = declare_parameter<std::string>("world_json", "");
@@ -331,7 +334,12 @@ private:
     const double vz = (com.z() - prev_->com.z()) / dt;
     const Vec3 w = attitudeError(prev_->q, q) / dt;  // body rate
     const Vec3 v_world = (p - prev_->p) / dt;
-    speed_ += 0.2 * ((R.transpose() * v_world).x() - speed_);  // ~25 ms EMA at 200 Hz
+    // forward speed: from the published twist when the source is a filter
+    // (/odom_est: each measurement update shifts the pose a few mm, which a
+    // pose difference turns into 0.45 m/s speed spikes and torque bursts that
+    // crept the car 4 cm through the inverted hold), else by pose difference
+    const double v_fwd = use_odom_twist_ ? m.twist.twist.linear.x : (R.transpose() * v_world).x();
+    speed_ += 0.2 * (v_fwd - speed_);  // ~25 ms EMA at 200 Hz
     roll_progress_ += w.dot(flip_axis_) * dt;
     prev_ = Prev{t, com, p, q};
     const double h = com.z() - landed_com_height_;
@@ -371,7 +379,10 @@ private:
     // ---------------- ground phase (ramp mode) ----------------
     const double s = pathS(p);  // distance along the track (run-in < 0 < arc < overhang)
     if (state_ == "ACCELERATE") {
-      fan = 1.0;
+      // fans only from shortly before the ramp (spin-up tau 0.3 s): on the flat
+      // they add nothing, and on the lower arc the centripetal load already
+      // presses the car on
+      fan = s > -fan_lead_ ? 1.0 : 0.0;
       drive = true;
       v_ref = std::min(climb_speed_, accel_ * ts);
       if (s >= 0.0) {
@@ -416,7 +427,10 @@ private:
           enter("HOLD_INVERTED", t);
         }
       } else {
-        v_ref = hold_kx_ * dist;
+        // stand still: once stopped, a position loop on the state estimate made
+        // the car follow the estimate's own refinement (5 cm in 2 s, IMU-flown
+        // run imu_fly2); the hold is only entered below 2 cm/s, so no creep
+        v_ref = 0.0;
         if (ts >= hold_inverted_time_ && release_after_hold_) {
           enter("DRIVE_OFF", t);
         }
@@ -526,7 +540,11 @@ private:
       const double side = R.col(1).y() >= 0 ? 1.0 : -1.0;
       lat = p.y();
       const double head = std::asin(std::clamp(R.col(0).y() * side, -1.0, 1.0));
-      steer = std::clamp(-steer_k_lat_ * lat * side - steer_k_head_ * head, -steer_max_, steer_max_);
+      // Steering off by default: the stunt track is straight in one vertical
+      // plane, so with no disturbance there is nothing to correct, and
+      // centimetre lateral estimate errors (IMU state) only twist the car.
+      steer = steer_enable_ ?
+        std::clamp(-steer_k_lat_ * lat * side - steer_k_head_ * head, -steer_max_, steer_max_) : 0.0;
     }
 
     // ---------------- allocate + publish ----------------
@@ -613,6 +631,7 @@ private:
   std::unique_ptr<LandingBrake> landing_;
   double landed_load_, mission_timeout_, start_delay_;
   std::string odom_topic_;
+  bool use_odom_twist_;
   std::optional<double> first_t_;
   double lambda_;
   Vec6 w_flight_, w_brake_;
@@ -627,7 +646,8 @@ private:
   double launch_u_ = 0.0;       // rear valve command during DRIVE_OFF
   Vec3 stop_point_ = Vec3::Zero();
   double speed_kp_, speed_ki_, tc_k_, tire_mu_, wheel_radius_;
-  double steer_k_lat_, steer_k_head_, steer_max_;
+  double steer_k_lat_, steer_k_head_, steer_max_, fan_lead_;
+  bool steer_enable_;
   double ramp_r_ = 0.0, ramp_cx_ = 0.0, ramp_cz_ = 0.0;
 
   std::optional<double> feed_ratio_;

@@ -29,6 +29,9 @@
 #include <ignition/gazebo/System.hh>
 #include <ignition/gazebo/Util.hh>
 #include <ignition/gazebo/components/Inertial.hh>
+#include <ignition/gazebo/components/JointForceCmd.hh>
+#include <ignition/gazebo/components/JointPosition.hh>
+#include <ignition/gazebo/components/JointVelocity.hh>
 #include <ignition/gazebo/components/Pose.hh>
 #include <ignition/msgs/double.pb.h>
 #include <ignition/msgs/float_v.pb.h>
@@ -45,6 +48,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -220,6 +224,31 @@ public:
     pub_fan_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_force");
     pub_gap_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_gap");
 
+    // suspension spring-dampers (roadster.urdf.xacro): applied here as joint
+    // forces rather than SDF joint springs, whose static deflection under this
+    // Fortress / DART build did not match k (the implied load changed with k)
+    if (auto s = sdfChild(sdf, "suspension")) {
+      susp_k_ = sdfGet<double>(s, "stiffness", 0.0);
+      susp_c_ = sdfGet<double>(s, "damping", 0.0);
+      susp_preload_ = sdfGet<double>(s, "preload", 0.0);
+      std::istringstream names(sdfGet<std::string>(s, "joints", ""));
+      std::string jn;
+      while (names >> jn) {
+        const auto j = model_.JointByName(ecm, jn);
+        if (j == gzs::kNullEntity) {
+          ignerr << "[roadster_actuation] suspension joint '" << jn << "' not found\n";
+          continue;
+        }
+        if (!ecm.Component<gzs::components::JointPosition>(j)) {
+          ecm.CreateComponent(j, gzs::components::JointPosition());
+        }
+        if (!ecm.Component<gzs::components::JointVelocity>(j)) {
+          ecm.CreateComponent(j, gzs::components::JointVelocity());
+        }
+        susp_joints_.push_back(j);
+      }
+    }
+
     // particle-emitter effects (roadster.urdf.xacro, with_effects): topics
     // <prefix>/<nozzle name> and <prefix>/<fan emitter name>
     if (auto fx = sdfChild(sdf, "effects")) {
@@ -294,6 +323,22 @@ public:
     const double ff = fan_->step(fan_cmd, g.h, dt);
     if (ff > 0) {
       link_.AddWorldForce(ecm, -body_z * ff, fan_point_link - com_link_);
+    }
+
+    // suspension: +q = wheel up relative to the chassis (compression); the
+    // spring pushes the wheel down / chassis up with the preload at q = 0
+    for (const auto j : susp_joints_) {
+      const auto * qp = ecm.Component<gzs::components::JointPosition>(j);
+      const auto * qv = ecm.Component<gzs::components::JointVelocity>(j);
+      const double qq = (qp && !qp->Data().empty()) ? qp->Data()[0] : 0.0;
+      const double qd = (qv && !qv->Data().empty()) ? qv->Data()[0] : 0.0;
+      const double force = -(susp_preload_ + susp_k_ * qq + susp_c_ * qd);
+      auto * cmd = ecm.Component<gzs::components::JointForceCmd>(j);
+      if (cmd) {
+        cmd->Data() = {force};
+      } else {
+        ecm.CreateComponent(j, gzs::components::JointForceCmd({force}));
+      }
     }
 
     // visual effects: particle plumes follow the actual (lagged) thrust / fan
@@ -401,6 +446,9 @@ private:
     pub_gap_;
   double state_period_ = 0.01;
   double last_state_t_ = -1.0;
+
+  std::vector<gzs::Entity> susp_joints_;
+  double susp_k_ = 0.0, susp_c_ = 0.0, susp_preload_ = 0.0;
 
   bool fx_enabled_ = false;
   double fx_rate_max_ = 60.0, fx_fan_rate_max_ = 40.0;

@@ -30,6 +30,8 @@ def setup(context):
         overrides['start_delay'] = float(cfg['start_delay'])
     use_est = cfg['state'] == 'imu'
     overrides['odom_topic'] = '/odom_est' if use_est else '/odom_truth'
+    # the filter's own velocity (body frame) beats differencing its corrected poses
+    overrides['use_odom_twist'] = use_est
     # the IMU estimator always runs (so its error against truth can be scored);
     # state:=imu makes the mission fly on it instead of on ground truth
     estimator = Node(package='roadster_control', executable='state_estimator_node',
