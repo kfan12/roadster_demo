@@ -13,10 +13,12 @@ node publish to the controllers / actuation topics directly, e.g.
       world:=roadster_zero_g_test z:=10 paused:=true
 
 World lookup: <world>.world.sdf in roadster_description/worlds, then
-urban_gazebo/worlds. The fan's analytic surfaces come from
-~/vlm_av_ws/maps/<world>.json when it exists (one owner: the world generator),
-else the actuation system falls back to a z = 0 ground plane.
+urban_gazebo/worlds. ~/vlm_av_ws/maps/<world>.json, when it exists, owns the
+world's geometry (one owner: scripts/generate_stunt_world.py): it supplies the
+fan's analytic surfaces and the default spawn pose. Without it the actuation
+system falls back to a z = 0 ground plane and the car spawns at the origin.
 """
+import json
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -46,10 +48,18 @@ def setup(context):
     urdf_file = os.path.join(pkg, 'urdf', 'roadster.urdf.xacro')
     bridge_cfg = os.path.join(pkg, 'config', 'bridge_roadster.yaml')
 
+    # maps/<world>.json (generate_stunt_world.py) owns the world's geometry:
+    # the fan's analytic surfaces and the default spawn pose
+    map_json = os.path.expanduser(f'~/vlm_av_ws/maps/{world}.json')
+    world_map = {}
+    if os.path.isfile(map_json):
+        with open(map_json) as f:
+            world_map = json.load(f)
     surfaces = cfg['surfaces_file']
     if surfaces == 'auto':
-        candidate = os.path.expanduser(f'~/vlm_av_ws/maps/{world}.json')
-        surfaces = candidate if os.path.isfile(candidate) else ''
+        surfaces = map_json if 'surfaces' in world_map else ''
+    spawn_default = {'x': 0.0, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
+    spawn_default.update(world_map.get('spawn', {}))
 
     xacro_args = {k: cfg[k] for k in ('chassis_mass', 'tire_mu', 'with_camera',
                                       'fan_initial_speed')}
@@ -90,7 +100,8 @@ def setup(context):
     pose = []
     for flag, key in (('-x', 'x'), ('-y', 'y'), ('-z', 'z'),
                       ('-R', 'roll'), ('-P', 'pitch'), ('-Y', 'yaw')):
-        pose += [flag, cfg[key]]
+        value = cfg[key] if cfg[key] != 'auto' else str(spawn_default[key])
+        pose += [flag, value]
 
     return [
         ExecuteProcess(cmd=gz_cmd,
@@ -137,13 +148,10 @@ def generate_launch_description():
         DeclareLaunchArgument('world', default_value='roadster_flat_test'),
         DeclareLaunchArgument('gui', default_value='false'),
         DeclareLaunchArgument('paused', default_value='false'),
-        # base_link sits at ground level (same as the sedan): spawn 5 cm up
-        DeclareLaunchArgument('x', default_value='0.0'),
-        DeclareLaunchArgument('y', default_value='0.0'),
-        DeclareLaunchArgument('z', default_value='0.05'),
-        DeclareLaunchArgument('roll', default_value='0.0'),
-        DeclareLaunchArgument('pitch', default_value='0.0'),
-        DeclareLaunchArgument('yaw', default_value='0.0'),
+        # spawn pose: 'auto' = the world JSON's "spawn", else base_link (which
+        # sits at ground level, same as the sedan) 5 cm above the origin
+        *[DeclareLaunchArgument(k, default_value='auto')
+          for k in ('x', 'y', 'z', 'roll', 'pitch', 'yaw')],
         DeclareLaunchArgument('chassis_mass', default_value='1730'),
         DeclareLaunchArgument('tire_mu', default_value='1.2'),
         DeclareLaunchArgument('with_camera', default_value='false'),
