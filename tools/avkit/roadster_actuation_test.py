@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import numpy as np
 import rclpy
@@ -39,7 +40,7 @@ from ros_gz_interfaces.msg import Float32Array
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-WS = '/home/kefan/vlm_av_ws'
+WS = str(Path(__file__).resolve().parents[2])  # this workspace
 G = 9.81
 WHEEL_RADIUS = 0.33  # base_link (odom frame) sits this far below the chassis frame
 

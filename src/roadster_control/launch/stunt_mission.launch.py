@@ -5,7 +5,7 @@
   ros2 launch roadster_control stunt_mission.launch.py mode:=ramp world:=roadster_ramp \\
       release_after_hold:=false        # Phase 4: climb and stay held upside down
 
-The world's geometry comes from ~/vlm_av_ws/maps/<world>.json (written by
+The world's geometry comes from roadster_description's maps/<world>.json (written by
 scripts/generate_stunt_world.py, the single owner).
 """
 import os
@@ -23,7 +23,8 @@ def setup(context):
     nozzles = os.path.join(get_package_share_directory('roadster_description'),
                            'config', 'nozzles.yaml')
     overrides = {'use_sim_time': True, 'nozzles_file': nozzles, 'mode': cfg['mode'],
-                 'world_json': os.path.expanduser(f'~/vlm_av_ws/maps/{cfg["world"]}.json')}
+                 'world_json': os.path.join(get_package_share_directory('roadster_description'),
+                                            'maps', f'{cfg["world"]}.json')}
     if cfg['release_after_hold'] != '':
         overrides['release_after_hold'] = cfg['release_after_hold'].lower() == 'true'
     if cfg['start_delay'] != '':

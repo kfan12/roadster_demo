@@ -15,7 +15,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(ros_gz_interfaces REQUIRED)
-find_package(av_feature_msgs REQUIRED)
+find_package(roadster_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
 # OSQP / osqp-eigen were built from source into /usr/local (CLAUDE.md gotcha)
@@ -31,7 +31,7 @@ target_link_libraries(roadster_allocator Eigen3::Eigen osqp::osqp OsqpEigen::Osq
 add_executable(stunt_mission_node src/stunt_mission_node.cpp)
 target_link_libraries(stunt_mission_node roadster_allocator yaml-cpp nlohmann_json::nlohmann_json)
 ament_target_dependencies(stunt_mission_node
-  rclcpp std_msgs nav_msgs geometry_msgs sensor_msgs ros_gz_interfaces av_feature_msgs)
+  rclcpp std_msgs nav_msgs geometry_msgs sensor_msgs ros_gz_interfaces roadster_msgs)
 
 # IMU strapdown + error-state EKF (wheel, surface, static updates) -> /odom_est
 find_package(roadster_gz_plugins REQUIRED)  # header-only analytic surfaces + JSON loader
@@ -41,7 +41,14 @@ target_link_libraries(state_estimator_node Eigen3::Eigen nlohmann_json::nlohmann
 ament_target_dependencies(state_estimator_node
   rclcpp nav_msgs geometry_msgs sensor_msgs roadster_gz_plugins)
 
-install(TARGETS roadster_allocator stunt_mission_node state_estimator_node
+# offline: replay a recorded run.jsonl through the estimator's filter
+#   ros2 run roadster_control ins_replay <run.jsonl> <maps/world.json> [key=value ...]
+add_executable(ins_replay tools/ins_replay.cpp)
+target_include_directories(ins_replay PRIVATE include)
+target_link_libraries(ins_replay Eigen3::Eigen nlohmann_json::nlohmann_json)
+ament_target_dependencies(ins_replay roadster_gz_plugins)
+
+install(TARGETS roadster_allocator stunt_mission_node state_estimator_node ins_replay
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})

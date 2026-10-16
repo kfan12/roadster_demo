@@ -11,7 +11,7 @@
 WORLD=${1:?world}; MODE=${2:?mode}; SESSION=${3:-$(date +%Y%m%d_%H%M%S)_${WORLD}_${MODE}}
 shift $(( $# < 3 ? $# : 3 ))
 [ "${1:-}" = "--" ] && shift
-WS=$HOME/vlm_av_ws
+WS=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)  # this workspace
 OUT=$WS/data/stunt_runs/$SESSION
 mkdir -p "$OUT"
 source /opt/ros/humble/setup.bash

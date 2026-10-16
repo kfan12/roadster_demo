@@ -30,6 +30,7 @@ import argparse
 import math
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import rclpy
@@ -39,7 +40,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-WS = '/home/kefan/vlm_av_ws'
+WS = str(Path(__file__).resolve().parents[2])  # this workspace
 WHEELS = {'fl': 'front_left_wheel_joint', 'fr': 'front_right_wheel_joint',
           'rl': 'rear_left_wheel_joint', 'rr': 'rear_right_wheel_joint'}
 # measure_direction child_to_parent: chassis-z component is +m g / 4 per wheel
@@ -107,7 +108,7 @@ def main():
     spawn = None
     if args.world:
         try:
-            with open(f'{WS}/maps/{args.world}.json') as f:
+            with open(f'{WS}/src/roadster_description/maps/{args.world}.json') as f:
                 spawn = json.load(f).get('spawn')
         except OSError:
             pass

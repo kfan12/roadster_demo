@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 import rclpy
-from av_feature_msgs.msg import StuntStatus
+from roadster_msgs.msg import StuntStatus
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 from rclpy.node import Node

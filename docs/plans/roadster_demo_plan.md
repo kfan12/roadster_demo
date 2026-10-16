@@ -1,6 +1,6 @@
 # Roadster stunt demo on the vlm_av_ws stack - implementation plan
 
-Branch: `tesla-roadster-investigation` (repo `kfan12/vlm_av_ws_roadster`).
+Repo: `kfan12/vlm_av_ws_roadster`, its own workspace (`~/roadster_ws`); it started as the `tesla-roadster-investigation` branch of `kfan12/vlm_av_ws`.
 Written 2026-10-16, one day after the 2026-10-15 unveil, so every Tesla figure below is early secondary reporting and may be revised.
 Source plan: `local/TeslaRoaster.pdf` (gitignored, local only).
 This document turns that PDF into concrete work on **this** repository: which packages are added, which existing pieces are reused, which PDF items change, and what each phase must measurably achieve.
@@ -166,10 +166,10 @@ src/
     test/test_control.cpp
     config/stunt_params.yaml, launch/stunt_mission.launch.py
     (planned: flight_planner for the hop, stunt_safety_monitor, PWM / min-on-time-aware allocation)
-src/av_feature_msgs/msg/StuntStatus.msg  BUILT: state, ground-phase and flight-phase telemetry
-src/urban_gazebo/worlds/roadster_hop.world.sdf / maps/roadster_hop.json   (Phase 6)
+src/roadster_msgs/msg/StuntStatus.msg    BUILT: state, ground-phase and flight-phase telemetry
+src/roadster_description/worlds/roadster_hop.world.sdf / maps/roadster_hop.json   (Phase 6)
 src/roadster_description/worlds/roadster_{ceiling,drop16,ramp}.world.sdf  BUILT, generated, not hand-edited
-maps/roadster_{ceiling,drop16,ramp}.json  BUILT, generated alongside each world (single geometry owner)
+src/roadster_description/maps/roadster_{ceiling,drop16,ramp}.json  BUILT, generated alongside each world (single geometry owner)
 scripts/generate_stunt_world.py           BUILT: ceiling and ramp kinds (hop row: Phase 6)
 scripts/run_stunt_scenario.sh             BUILT: paused sim + mission + record + analyze, one command
 tools/avkit/roadster_sizing.py            (Phase 0) the Section 2 arithmetic as a script
@@ -192,7 +192,7 @@ Language policy holds: everything in the control loop is C++; Python is only wor
 | `/roadster/wheel_wrench/{fl,fr,rl,rr}` | `geometry_msgs/Wrench` (gz `Wrench`) | gz -> ROS | wheel normal force from F/T sensors |
 | `/roadster/body_contact` | `ros_gz_interfaces/Contacts` | gz -> ROS | landing impact, scrape detection |
 | `/odom_truth`, `/imu`, `/clock` | as today | gz -> ROS | same names as the sedan bridge |
-| `/stunt/status` | `av_feature_msgs/StuntStatus` | ROS | for recorder, RViz text, PlotJuggler |
+| `/stunt/status` | `roadster_msgs/StuntStatus` | ROS | for recorder, RViz text, PlotJuggler |
 | `/stunt/start`, `/stunt/abort`, `/roadster/tank/recharge` | `std_srvs/Trigger` | ROS | the recharge service is implemented as a gz service bridged, or by respawn (Phase 2 decides) |
 
 ### 5.2 Gas tank model (inside ColdGasThrusterSystem)

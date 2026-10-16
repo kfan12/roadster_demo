@@ -30,11 +30,12 @@ import random
 
 import rclpy
 import yaml
-from av_feature_msgs.msg import StuntStatus
 from geometry_msgs.msg import Point, PoseStamped
 from nav_msgs.msg import Odometry, Path
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from roadster_msgs.msg import StuntStatus
 from sensor_msgs.msg import Imu
 from ros_gz_interfaces.msg import Float32Array
 from std_msgs.msg import ColorRGBA, Float64
@@ -464,7 +465,10 @@ class StuntViz(Node):
 
 def main():
     rclpy.init()
-    rclpy.spin(StuntViz())
+    try:
+        rclpy.spin(StuntViz())
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # Ctrl+C / launch shutdown: exit quietly, not with a traceback
 
 
 if __name__ == '__main__':

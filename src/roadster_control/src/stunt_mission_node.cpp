@@ -32,7 +32,7 @@
 // comes from the world JSON (maps/<world>.json, one owner: the generator).
 #include <yaml-cpp/yaml.h>
 
-#include <av_feature_msgs/msg/stunt_status.hpp>
+#include <roadster_msgs/msg/stunt_status.hpp>
 #include <geometry_msgs/msg/wrench.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -150,7 +150,7 @@ public:
       "/wheel_effort_controller/commands", 10);
     pub_steer_ = create_publisher<std_msgs::msg::Float64MultiArray>(
       "/steering_position_controller/commands", 10);
-    pub_status_ = create_publisher<av_feature_msgs::msg::StuntStatus>("/stunt/status", 10);
+    pub_status_ = create_publisher<roadster_msgs::msg::StuntStatus>("/stunt/status", 10);
     sub_feed_ = create_subscription<std_msgs::msg::Float64>(
       "/roadster/tank/feed_ratio", 10, [this](std_msgs::msg::Float64::SharedPtr m) {
         feed_ratio_ = m->data;
@@ -599,7 +599,7 @@ private:
     wm.data = {steer, steer};
     pub_steer_->publish(wm);
 
-    av_feature_msgs::msg::StuntStatus st;
+    roadster_msgs::msg::StuntStatus st;
     st.header = m.header;
     st.state = state_;
     st.t_state = t - t_state0_;
@@ -689,7 +689,7 @@ private:
   rclcpp::Publisher<ros_gz_interfaces::msg::Float32Array>::SharedPtr pub_thr_;
   rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_fan_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_wheel_, pub_steer_;
-  rclcpp::Publisher<av_feature_msgs::msg::StuntStatus>::SharedPtr pub_status_;
+  rclcpp::Publisher<roadster_msgs::msg::StuntStatus>::SharedPtr pub_status_;
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr sub_feed_, sub_mass_;
   rclcpp::Subscription<ros_gz_interfaces::msg::Float32Array>::SharedPtr sub_thrust_;
   std::array<rclcpp::Subscription<geometry_msgs::msg::Wrench>::SharedPtr, 4> sub_wrench_;

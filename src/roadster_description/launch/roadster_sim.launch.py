@@ -12,9 +12,8 @@ node publish to the controllers / actuation topics directly, e.g.
   ros2 launch roadster_description roadster_sim.launch.py \\
       world:=roadster_zero_g_test z:=10 paused:=true
 
-World lookup: <world>.world.sdf in roadster_description/worlds, then
-urban_gazebo/worlds. ~/vlm_av_ws/maps/<world>.json, when it exists, owns the
-world's geometry (one owner: scripts/generate_stunt_world.py): it supplies the
+World lookup: <world>.world.sdf in this package's worlds/. Its maps/<world>.json,
+when it exists, owns the world's geometry (one owner: scripts/generate_stunt_world.py): it supplies the
 fan's analytic surfaces and the default spawn pose. Without it the actuation
 system falls back to a z = 0 ground plane and the car spawns at the origin.
 """
@@ -30,14 +29,12 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def find_world(world):
-    for pkg in ('roadster_description', 'urban_gazebo'):
-        try:
-            path = os.path.join(get_package_share_directory(pkg), 'worlds', f'{world}.world.sdf')
-        except Exception:  # package not installed
-            continue
-        if os.path.isfile(path):
-            return path
-    raise RuntimeError(f'world {world}.world.sdf not found in roadster_description or urban_gazebo')
+    path = os.path.join(get_package_share_directory('roadster_description'), 'worlds',
+                        f'{world}.world.sdf')
+    if not os.path.isfile(path):
+        raise RuntimeError(f'world {world}.world.sdf not found in roadster_description/worlds '
+                           '(generate it with scripts/generate_stunt_world.py, then rebuild)')
+    return path
 
 
 def setup(context):
@@ -50,7 +47,7 @@ def setup(context):
 
     # maps/<world>.json (generate_stunt_world.py) owns the world's geometry:
     # the fan's analytic surfaces and the default spawn pose
-    map_json = os.path.expanduser(f'~/vlm_av_ws/maps/{world}.json')
+    map_json = os.path.join(pkg, 'maps', f'{world}.json')
     world_map = {}
     if os.path.isfile(map_json):
         with open(map_json) as f:
@@ -98,7 +95,7 @@ def setup(context):
     # Fortress's contact system ignores the sensor's <topic> and publishes on
     # the scoped default name, which embeds the world - bridged as a separate
     # positional-arg node (a positional arg on the config_file node silently
-    # drops the config_file bridges, see urban_world.launch.py)
+    # drops the config_file bridges, see robot_bringup/launch/urban_world.launch.py in kfan12/vlm_av_ws)
     contact_gz = (f'/world/{world}/model/roadster/link/base_link/sensor/'
                   'body_contact/contact')
 
@@ -164,6 +161,6 @@ def generate_launch_description():
         DeclareLaunchArgument('fan_initial_speed', default_value='0.0',
                               description='fan spin state at spawn (1.0 for a ceiling hold)'),
         DeclareLaunchArgument('surfaces_file', default_value='auto',
-                              description="'auto' = ~/vlm_av_ws/maps/<world>.json if present"),
+                              description="'auto' = maps/<world>.json in this package, if present"),
         OpaqueFunction(function=setup),
     ])

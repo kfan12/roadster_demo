@@ -40,7 +40,7 @@ def setup(context):
     world = cfg['world']
     ctrl = get_package_share_directory('roadster_control')
     desc = get_package_share_directory('roadster_description')
-    world_json = os.path.expanduser(f'~/vlm_av_ws/maps/{world}.json')
+    world_json = os.path.join(desc, 'maps', f'{world}.json')
     if not os.path.isfile(world_json):
         raise RuntimeError(f'{world_json} missing: run scripts/generate_stunt_world.py first')
 
