@@ -139,11 +139,18 @@ def build_ramp(a):
     th1 = th0 + arc
     n = max(8, int(math.ceil(a.arc_deg / a.seg_deg)))
     d = arc / n
-    seg_len = 2 * R * math.tan(d / 2) + a.overlap
+    # Inscribed polygon: every box's inner face is the chord between two
+    # vertices ON the radius-R circle, so consecutive faces meet exactly and the
+    # last vertex lands exactly on the overhang (z = 2R) and the first on the
+    # ground. (Tangent-at-midpoint boxes left their ends R / cos(d/2) - R =
+    # 2.7 mm outside the circle: a step onto the overhang that briefly
+    # unloaded a wheel to 0.2 kN at 6 m/s.) The `overlap` extension of each box
+    # lies outside the circle, behind the neighbouring face, so it adds no step.
+    seg_len = 2 * R * math.sin(d / 2) + a.overlap
     links = ''
     for i in range(n):
         th = th0 + (i + 0.5) * d
-        rc = R + t / 2  # inner face of the box sits on the radius-R circle
+        rc = R * math.cos(d / 2) + t / 2  # inner face on the chord
         x, z = rc * math.cos(th), R + rc * math.sin(th)
         pitch = math.atan2(-math.cos(th), -math.sin(th))  # box x along the arc tangent
         shade = 0.45 + 0.15 * (i % 2)
@@ -197,7 +204,7 @@ def main():
     ap.add_argument('--seg-deg', type=float, default=3.0, help='box-chain segment angle')
     ap.add_argument('--overlap', type=float, default=0.02, help='segment length overlap [m]')
     ap.add_argument('--overhang-len', type=float, default=10.0)
-    ap.add_argument('--run-in', type=float, default=40.0, help='spawn distance before the ramp')
+    ap.add_argument('--run-in', type=float, default=25.0, help='spawn distance before the ramp')
     a = ap.parse_args()
     name = a.out or f'roadster_{a.kind}'
 

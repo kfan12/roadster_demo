@@ -6,7 +6,10 @@
 Reads <session>/run.jsonl (record_stunt_run.py), writes <session>/metrics.json
 and prints a report. Metrics (plan section 9): flip rotation, touchdown
 vertical speed and attitude, peak landing deceleration, body (non-wheel)
-contacts after release, impulse and gas used, state timeline.
+contacts after release, impulse and gas used, state timeline. Ramp runs
+(timeline starts with ACCELERATE) are also scored on the ground phase: arc
+progress, inverted hold time / stillness / wheel loads, lateral offset and
+body contacts on the ramp; flight checks apply only when the car released.
 
 Touchdown = first odom sample after release whose base_link is within
 --td-height of the ground (base_link sits at wheel-contact level). Vertical
@@ -39,6 +42,10 @@ def main():
     ap.add_argument('--max-td-tilt-deg', type=float, default=10.0)
     ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
+    ap.add_argument('--min-hold', type=float, default=2.0, help='inverted hold [s] (ramp)')
+    ap.add_argument('--min-normal', type=float, default=500.0,
+                    help='per-wheel normal force while held [N] (ramp); upside down a '
+                         "wheel's own weight already reads ~147 N")
     args = ap.parse_args()
     sess = Path(args.session)
     recs = [json.loads(line) for line in open(sess / 'run.jsonl')]
@@ -93,23 +100,67 @@ def main():
     m['body_contacts_after_release'] = len(after)
     m['body_contact_with'] = sorted({w for c in after for w in c['with']})
 
-    checks = {
-        'landed': final['state'] == 'LANDED' or any(st == 'LANDED' for _, st in timeline),
-        'touchdown found': 'touchdown_vz' in m,
-        'touchdown speed': 'touchdown_vz' in m and abs(m['touchdown_vz']) < args.max_td_speed,
-        'touchdown attitude': 'touchdown_tilt_deg' in m and
-        m['touchdown_tilt_deg'] < args.max_td_tilt_deg,
-        'flip rotation': abs(m['flip_rotation_deg'] - 360 * args.turns) < args.max_rot_err_deg,
-        'no body contact': m['body_contacts_after_release'] == 0,
-    }
+    checks = {}
+    ramp = any(st == 'ACCELERATE' for _, st in timeline)
+    if ramp:
+        # ground phase: from the start until release (or the end of a hold-only run)
+        t_end_ground = t_release if t_release is not None else status[-1]['t'] + 1
+        ground = [s for s in status if s['t'] < t_end_ground]
+        held = [s for s in ground if s['state'] == 'HOLD_INVERTED']
+        on_ramp = [s for s in ground if s['state'] in ('CLIMB', 'OVERHANG', 'HOLD_INVERTED')]
+        m['max_arc_angle_deg'] = math.degrees(max(s['arc_angle'] for s in ground))
+        m['max_lateral_offset_m'] = max(abs(s['lateral_offset']) for s in ground)
+        m['min_wheel_normal_on_ramp_N'] = min(
+            (s['min_wheel_normal'] for s in on_ramp), default=None)
+        m['min_wheel_normal_held_N'] = min((s['min_wheel_normal'] for s in held), default=None)
+        m['inverted_hold_s'] = (held[-1]['t'] - held[0]['t']) if held else 0.0
+        m['max_climb_speed'] = max(s['speed'] for s in ground)
+        # stillness over the final min_hold seconds of the hold (the plan's
+        # "stays attached for 2 s"); the hold loop may still be settling the
+        # last centimetre right after entry
+        ho = [o for o in odom if held and max(held[0]['t'], held[-1]['t'] - args.min_hold)
+              <= o['t'] <= held[-1]['t']]
+        if ho:
+            p0 = ho[0]['p']
+            m['hold_drift_m'] = max(math.dist(o['p'], p0) for o in ho)
+            m['hold_xyz'] = p0
+            m['hold_inverted_cos'] = min(-body_z(o['q'])[2] for o in ho)
+        ground_contacts = [c for c in contacts if c['t'] < t_end_ground]
+        m['body_contacts_on_ramp'] = len(ground_contacts)
+        m['body_contact_on_ramp_with'] = sorted({w for c in ground_contacts for w in c['with']})
+        checks.update({
+            'reached fully inverted': m['max_arc_angle_deg'] >= 179.0,
+            f'held inverted >= {args.min_hold:.1f} s': m['inverted_hold_s'] >= args.min_hold,
+            'stayed upside down while held': m.get('hold_inverted_cos', 0) > math.cos(
+                math.radians(5)),
+            'held still (< 2 cm)': m.get('hold_drift_m', 1e9) < 0.02,
+            'wheels loaded while held': (m['min_wheel_normal_held_N'] or 0) > args.min_normal,
+            'stayed centred (< 0.2 m)': m['max_lateral_offset_m'] < 0.2,
+            'no body contact on the ramp': m['body_contacts_on_ramp'] == 0,
+        })
+    if t_release is not None or not ramp:
+        checks.update({
+            'landed': final['state'] == 'LANDED' or any(st == 'LANDED' for _, st in timeline),
+            'touchdown found': 'touchdown_vz' in m,
+            'touchdown speed': 'touchdown_vz' in m and abs(m['touchdown_vz']) < args.max_td_speed,
+            'touchdown attitude': 'touchdown_tilt_deg' in m and
+            m['touchdown_tilt_deg'] < args.max_td_tilt_deg,
+            'flip rotation': abs(m['flip_rotation_deg'] - 360 * args.turns) < args.max_rot_err_deg,
+            'no body contact after release': m['body_contacts_after_release'] == 0,
+        })
     m['checks'] = checks
     m['pass'] = all(checks.values())
     (sess / 'metrics.json').write_text(json.dumps(m, indent=2) + '\n')
 
     print('timeline: ' + '  '.join(f'{t:.2f} {st}' for t, st in timeline))
-    for k in ('flip_rotation_deg', 'touchdown_vz', 'touchdown_tilt_deg', 'peak_vertical_accel_g',
+    for k in ('max_arc_angle_deg', 'max_climb_speed', 'max_lateral_offset_m',
+              'min_wheel_normal_on_ramp_N', 'min_wheel_normal_held_N', 'inverted_hold_s',
+              'hold_drift_m', 'hold_xyz', 'body_contacts_on_ramp', 'body_contact_on_ramp_with',
+              'flip_rotation_deg', 'touchdown_vz', 'touchdown_tilt_deg', 'peak_vertical_accel_g',
               'impulse_used_Ns', 'gas_used_kg', 'tank_mass_end_kg', 'max_height_m',
               'body_contacts_after_release', 'body_contact_with', 't_touchdown', 'touchdown_xy'):
+        if k not in m:
+            continue
         v = m.get(k)
         print(f'  {k:28s} {v:.3f}' if isinstance(v, float) else f'  {k:28s} {v}')
     for k, ok in checks.items():

@@ -11,6 +11,14 @@ float64 vz                # COM vertical velocity, world frame [m/s]
 float64 roll_progress     # flip rotation achieved about the flip axis [rad]
 float64 attitude_error    # angle between the reference and actual attitude [rad]
 
+# ground phase (ramp mode)
+float64 speed             # forward speed along the body x axis [m/s]
+float64 speed_ref         # [m/s]
+float64 arc_angle         # progress round the ramp arc: 0 at its bottom, pi fully inverted [rad]
+float64 lateral_offset    # offset across the ramp width from its centreline [m]
+float64 min_wheel_normal  # smallest wheel normal force (chassis z, F/T sensors) [N]
+float64[4] wheel_torque   # commanded FL FR RL RR [N m], after traction control
+
 float64 tank_mass         # gas remaining [kg]
 float64 feed_ratio        # nozzle feed pressure / reference pressure (0 = cannot fire)
 float64 impulse_used      # integral of total measured thrust since mission start [N s]

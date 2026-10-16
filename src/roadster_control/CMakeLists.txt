@@ -11,6 +11,9 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nlohmann_json REQUIRED)
 find_package(ros_gz_interfaces REQUIRED)
 find_package(av_feature_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -26,9 +29,9 @@ target_include_directories(roadster_allocator PUBLIC
 target_link_libraries(roadster_allocator Eigen3::Eigen osqp::osqp OsqpEigen::OsqpEigen)
 
 add_executable(stunt_mission_node src/stunt_mission_node.cpp)
-target_link_libraries(stunt_mission_node roadster_allocator yaml-cpp)
+target_link_libraries(stunt_mission_node roadster_allocator yaml-cpp nlohmann_json::nlohmann_json)
 ament_target_dependencies(stunt_mission_node
-  rclcpp std_msgs nav_msgs ros_gz_interfaces av_feature_msgs)
+  rclcpp std_msgs nav_msgs geometry_msgs sensor_msgs ros_gz_interfaces av_feature_msgs)
 
 install(TARGETS roadster_allocator stunt_mission_node
   ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION lib/${PROJECT_NAME})

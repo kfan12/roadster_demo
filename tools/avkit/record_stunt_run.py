@@ -52,7 +52,10 @@ class Recorder(Node):
         self.state = m.state
         self.write({'t': self.t, 'topic': 'status', 'state': m.state, 't_state': m.t_state,
                     'height': m.height, 'vz': m.vz, 'roll_progress': m.roll_progress,
-                    'attitude_error': m.attitude_error, 'tank_mass': m.tank_mass,
+                    'attitude_error': m.attitude_error, 'speed': m.speed,
+                    'speed_ref': m.speed_ref, 'arc_angle': m.arc_angle,
+                    'lateral_offset': m.lateral_offset, 'min_wheel_normal': m.min_wheel_normal,
+                    'wheel_torque': list(m.wheel_torque), 'tank_mass': m.tank_mass,
                     'feed_ratio': m.feed_ratio, 'impulse_used': m.impulse_used,
                     'fan_cmd': m.fan_cmd, 'wrench_des': list(m.wrench_des),
                     'wrench_alloc': list(m.wrench_alloc)})
@@ -80,8 +83,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--world', required=True)
     ap.add_argument('--out', required=True, help='session directory')
-    ap.add_argument('--timeout', type=float, default=20.0, help='[s sim]')
+    ap.add_argument('--timeout', type=float, default=30.0, help='[s sim]')
     ap.add_argument('--tail', type=float, default=2.0, help='record after LANDED/ABORT [s sim]')
+    ap.add_argument('--stop-after-state', default=None,
+                    help='also stop --tail s after this state is entered (e.g. HOLD_INVERTED '
+                         'for a hold-only run, where the mission never lands)')
+    ap.add_argument('--stop-state-hold', type=float, default=0.0,
+                    help='...but only once that state has lasted this long [s sim]')
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -98,6 +106,8 @@ def main():
         rclpy.spin_once(rec, timeout_sec=0.01)
         if rec.state in ('LANDED', 'ABORT') and t_end is None:
             t_end = rec.t + args.tail
+        if args.stop_after_state and rec.state == args.stop_after_state and t_end is None:
+            t_end = rec.t + args.stop_state_hold + args.tail
         if (t_end is not None and rec.t >= t_end) or rec.t > args.timeout:
             break
     rec.f.close()
