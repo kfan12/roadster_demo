@@ -1,6 +1,6 @@
 # Roadster stunt demo on the vlm_av_ws stack - implementation plan
 
-Repo: `kfan12/vlm_av_ws_roadster`, its own workspace (`~/roadster_ws`); it started as the `tesla-roadster-investigation` branch of `kfan12/vlm_av_ws`.
+Repo: `kfan12/roadster_demo`, its own workspace (`~/roadster_ws`); it started as the `tesla-roadster-investigation` branch of `kfan12/vlm_av_ws`.
 Written 2026-10-16, one day after the 2026-10-15 unveil, so every Tesla figure below is early secondary reporting and may be revised.
 Source plan: `local/TeslaRoaster.pdf` (gitignored, local only).
 This document turns that PDF into concrete work on **this** repository: which packages are added, which existing pieces are reused, which PDF items change, and what each phase must measurably achieve.
