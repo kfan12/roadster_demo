@@ -159,23 +159,22 @@ src/
     src/roadster_actuation_system.cpp    tank + 10 nozzles + suction fan (+ rear door later)
     include/roadster_gz_plugins/tank_model.hpp, nozzle_model.hpp, fan_model.hpp   pure math, unit-tested
     test/test_models.cpp
-  roadster_control/            C++ ROS 2 nodes
-    src/stunt_mission_node.cpp           BehaviorTree.CPP v3 mission FSM + drive/fan/attitude loops
-    src/thrust_allocator.cpp             OSQP QP B u = [F; tau], 0 <= u <= 1, plus PWM
-    src/flight_planner.cpp               release / hop / flip / landing-burn planning
-    src/stunt_safety_monitor.cpp         tank, tilt, contact-loss, timeout watchdog -> ABORT
-    include/roadster_control/ramp_frame.hpp   (s, d, surface normal) from the ramp JSON
-    test/test_allocator.cpp, test_ramp_frame.cpp, test_flight_planner.cpp
-    config/stunt_params.yaml
-src/av_feature_msgs/msg/StuntStatus.msg  mission state, tank mass/pressure, impulse used, flip angle, contact flags
-src/robot_bringup/launch/roadster_stunt.launch.py
-src/robot_bringup/config/bridge_roadster.yaml
-src/urban_gazebo/worlds/roadster_{flat,ceiling,ramp,hop}.world.sdf    generated, not hand-edited
-maps/roadster_{flat,ceiling,ramp,hop}.json                            generated alongside each world
-scripts/generate_stunt_world.py           parametric ramp mesh + obstacle row + landing pad, writes world + json
-scripts/{record,analyze}_stunt_run.sh
-tools/avkit/roadster_sizing.py            the Section 2 arithmetic as a script, emits a first roadster_params.yaml
-tools/avkit/record_stunt_run.py, analyze_stunt_run.py, stunt_monte_carlo.py
+  roadster_control/            BUILT 2026-10-16 (C++ ROS 2)
+    src/stunt_mission_node.cpp           mission FSM (modes ramp, drop) + drive / fan / attitude / landing loops
+    src/allocator.cpp                    OSQP QP B u = [F; tau], 0 <= u <= 1, forces weighted in world axes
+    include/roadster_control/attitude.hpp, landing.hpp, allocator.hpp
+    test/test_control.cpp
+    config/stunt_params.yaml, launch/stunt_mission.launch.py
+    (planned: flight_planner for the hop, stunt_safety_monitor, PWM / min-on-time-aware allocation)
+src/av_feature_msgs/msg/StuntStatus.msg  BUILT: state, ground-phase and flight-phase telemetry
+src/urban_gazebo/worlds/roadster_hop.world.sdf / maps/roadster_hop.json   (Phase 6)
+src/roadster_description/worlds/roadster_{ceiling,drop16,ramp}.world.sdf  BUILT, generated, not hand-edited
+maps/roadster_{ceiling,drop16,ramp}.json  BUILT, generated alongside each world (single geometry owner)
+scripts/generate_stunt_world.py           BUILT: ceiling and ramp kinds (hop row: Phase 6)
+scripts/run_stunt_scenario.sh             BUILT: paused sim + mission + record + analyze, one command
+tools/avkit/roadster_sizing.py            (Phase 0) the Section 2 arithmetic as a script
+tools/avkit/record_stunt_run.py, analyze_stunt_run.py   BUILT; stunt_monte_carlo.py (Phase 7)
+tools/avkit/roadster_actuation_test.py, roadster_hold_test.py, roadster_smoke_drive.py   BUILT
 ```
 
 Language policy holds: everything in the control loop is C++; Python is only world generation, sizing and offline analysis.
@@ -287,6 +286,39 @@ Phase 1 status (2026-10-16): the model part is done and smoke-tested with `tools
 The four wheel normal forces sum to the sprung weight within 0.1%, steering settles from a 0.3 rad step in 0.175 s, the full-torque tire-only 0-60 mph takes 2.29 s (1.19 g, mass-independent as expected, inside the 2.2-2.6 s window), yaw drift is 0.01 deg, and RTF is 1.00 at the 1 ms step.
 Two findings fed back into the model: Fortress ignores a contact sensor's `<topic>` (the launch file bridges the world-scoped name instead), and the sedan's 400 N.m steering effort stalls under standstill tire scrub at 1,800 kg (raised to 3000 N.m).
 Still open for Phase 1: a drive controller with traction control (at full torque the wheels spin to their 200 rad/s limit, slip ratio +1.46), wheel odometry, and the Bullet smoke test.
+
+### Demo A status (2026-10-16): done in simulation, 10/10 runs
+
+Demo A was built ahead of Phases 3 and 6, in the order: zero-g force-point test, ceiling hold, drop-flip-land, ramp climb and hold, full chain.
+Run it with `scripts/run_stunt_scenario.sh roadster_ramp ramp`; each run lands in `data/stunt_runs/<session>/` with `run.jsonl` and `metrics.json`.
+
+| Check (plan exit criteria) | Result, all 10 runs |
+| --- | --- |
+| Climbs to fully inverted, no body contact | yes; minimum wheel load on the ramp 1.71-1.72 kN |
+| Holds stationary upside down >= 2 s | 2.00 s at x = -7.00 m, still to 0.7-0.8 cm, wheels >= 2.3 kN, lateral offset 0.000 m |
+| Flip rotation 180 deg +- 15 | 180.0 deg (roll, "kick flip") |
+| Touchdown vertical speed < 3 m/s | 2.19-2.24 m/s |
+| Touchdown attitude error < 10 deg | 0.01 deg |
+| Landing spot | 6 cm from directly below the hold point |
+| Gas / impulse | 47.9-48.1 kN s, 137 kg of the 250 kg fill (consistent with the Section 2 estimate) |
+
+Ramp: R = 8 m, 180 deg, 10 m overhang, so the drop is about 16 m.
+The release, flip and landing were developed first on `roadster_drop16` (a ceiling at 16 m), which reproduces the top-of-ramp state and gives identical flight numbers.
+
+Findings that changed the design along the way:
+- `Link::AddWorldForce`'s position argument is an offset from the link COM, not a link-frame point (Section 5.3).
+- The first nozzle layout (four in-plane side nozzles) could only roll the car with +z thrust, which pushed it 4.5 m sideways mid-flip.
+  Roof-corner nozzles (body -z) make force-free roll couples; drift is now 5.6 cm.
+- Tangent-at-midpoint arc boxes left a 2.7 mm step onto the overhang that unloaded a wheel to 0.2 kN at 6 m/s; the arc is now an inscribed polygon.
+- A speed-vs-distance stop law demands twice the available deceleration at its crossover; the stop onto the hold point is a planned constant-deceleration trajectory instead.
+- Fortress ignores a contact sensor's `<topic>`, `Link::WorldPose` needs a `WorldPose` component, and WorldControl reset leaves the car moving.
+
+Known gaps, not blocking Demo A:
+- Peak deceleration at touchdown is about 8.3 g: the car has rigid wheels and no suspension. A suspension model belongs to Phase 7.
+- Touchdown speed is 2.2 m/s against the 1.5 m/s profile target; the brake feedback (`brake_kv`) could be raised.
+- State is ground truth; the EKF path, sensor noise and Monte Carlo robustness are Phase 7.
+- No rear nozzle door, no plume visuals and no video calibration yet (Phase 8); ramp radius and fan force are assumptions until then.
+- The zero-g test failed once in 13 runs, unexplained and not reproduced since; it now refuses to run with another thruster publisher alive.
 
 Phase ordering note: Phase 3 comes before fans on purpose, because it validates the thruster plugin under the simplest dynamics and calibrates mass against the 0.81 s figure before any ramp tuning depends on mass.
 

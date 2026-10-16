@@ -113,7 +113,12 @@ def main():
         m['min_wheel_normal_on_ramp_N'] = min(
             (s['min_wheel_normal'] for s in on_ramp), default=None)
         m['min_wheel_normal_held_N'] = min((s['min_wheel_normal'] for s in held), default=None)
-        m['inverted_hold_s'] = (held[-1]['t'] - held[0]['t']) if held else 0.0
+        # hold duration from the state timeline (entry -> next state's entry);
+        # first-to-last sample would miss one 5 ms status period
+        hold_t0 = next((t for t, st in timeline if st == 'HOLD_INVERTED'), None)
+        hold_t1 = next((t for t, st in timeline if hold_t0 is not None and t > hold_t0), None)
+        m['inverted_hold_s'] = 0.0 if hold_t0 is None else (
+            (hold_t1 if hold_t1 is not None else status[-1]['t']) - hold_t0)
         m['max_climb_speed'] = max(s['speed'] for s in ground)
         # stillness over the final min_hold seconds of the hold (the plan's
         # "stays attached for 2 s"); the hold loop may still be settling the
