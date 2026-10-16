@@ -20,6 +20,8 @@
 //   pub /roadster/thruster_state Float_V, actual thrust per nozzle [N]
 //   pub /roadster/tank/pressure  Double [Pa]
 //   pub /roadster/tank/mass      Double [kg] gas remaining
+//   pub /roadster/tank/feed_ratio Double, nozzle feed / reference pressure: the
+//                                factor every nozzle's f_max is scaled by now
 //   pub /roadster/fan_force      Double [N]
 //   pub /roadster/fan_gap        Double [m] (inf -> no surface under the car)
 #include <ignition/gazebo/Link.hh>
@@ -249,6 +251,7 @@ public:
     pub_thrust_ = node_.Advertise<ignition::msgs::Float_V>("/roadster/thruster_state");
     pub_pressure_ = node_.Advertise<ignition::msgs::Double>("/roadster/tank/pressure");
     pub_mass_ = node_.Advertise<ignition::msgs::Double>("/roadster/tank/mass");
+    pub_feed_ = node_.Advertise<ignition::msgs::Double>("/roadster/tank/feed_ratio");
     pub_fan_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_force");
     pub_gap_ = node_.Advertise<ignition::msgs::Double>("/roadster/fan_gap");
 
@@ -317,6 +320,7 @@ public:
       pub_thrust_.Publish(th);
       publishDouble(pub_pressure_, tank_->pressure());
       publishDouble(pub_mass_, tank_->mass());
+      publishDouble(pub_feed_, p_ref > 0 ? tank_->feedPressure() / p_ref : 0.0);
       publishDouble(pub_fan_, ff);
       publishDouble(pub_gap_, g.h);
     }
@@ -368,7 +372,8 @@ private:
   double fan_cmd_ = 0.0;
 
   ignition::transport::Node node_;
-  ignition::transport::Node::Publisher pub_thrust_, pub_pressure_, pub_mass_, pub_fan_, pub_gap_;
+  ignition::transport::Node::Publisher pub_thrust_, pub_pressure_, pub_mass_, pub_feed_, pub_fan_,
+    pub_gap_;
   double state_period_ = 0.01;
   double last_state_t_ = -1.0;
 };

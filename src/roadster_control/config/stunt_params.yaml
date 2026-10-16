@@ -1,0 +1,34 @@
+# stunt_mission_node parameters (docs/plans/roadster_demo_plan.md 5.6-5.8).
+stunt_mission_node:
+  ros__parameters:
+    mode: drop
+    # rigid body, from the expanded roadster URDF (rigid_body() in
+    # tools/avkit/roadster_actuation_test.py prints these): total mass, COM in
+    # the chassis frame, inertia about the COM
+    mass: 1800.01
+    com_chassis: [0.0075, 0.0, 0.0]
+    inertia_diag: [584.5, 3119.5, 3562.0]
+    chassis_offset_z: 0.33       # chassis frame above base_link (wheel radius)
+    landed_com_height: 0.33      # COM height when standing on the ground
+
+    hold_time: 1.0               # fan hold before release [s]
+    # flip: 0.5 turn takes the inverted car (top of the ramp) to upright
+    flip_axis: [1.0, 0.0, 0.0]   # body roll = "kick flip"
+    flip_turns: 0.5
+    flip_delay: 0.4              # fall clear of the ceiling first (~1 m) [s]
+    flip_duration: 0.8           # [s]
+    att_kp: [36.0, 36.0, 36.0]   # 6 rad/s natural frequency
+    att_kd: [10.8, 10.8, 10.8]   # zeta 0.9
+
+    brake_accel: 14.7            # 1.5 g constant-deceleration profile
+    touchdown_speed: 1.5         # [m/s], plan target < 3
+    brake_kv: 3.0
+    landed_z: 0.03               # base_link height that counts as on the ground
+    mission_timeout: 15.0
+
+    alloc_lambda: 1.0e-4         # valve-opening penalty (saves gas)
+    # [Fx(world) Fy(world) Fz(world) Tx Ty Tz(body)] priorities. Flight: torque first,
+    # then no net force (down + roof corner nozzles make force-free couples);
+    # brake: world lift + torque, little horizontal push.
+    alloc_weights_flight: [0.01, 0.01, 0.01, 1.0, 1.0, 1.0]
+    alloc_weights_brake: [0.05, 0.05, 1.0, 1.0, 1.0, 1.0]

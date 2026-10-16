@@ -1,0 +1,68 @@
+{
+  "world": "roadster_drop16",
+  "generator": "generate_stunt_world.py --kind ceiling --out roadster_drop16 --width 5.0 --thickness 0.4 --mu 1.5 --height 16.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 10.0 --run-in 40.0",
+  "spawn": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 15.99,
+    "roll": 3.141592653589793,
+    "pitch": 0.0,
+    "yaw": 0.0
+  },
+  "geometry": {
+    "kind": "ceiling",
+    "height": 16.0,
+    "slab_len": 20.0,
+    "width": 5.0
+  },
+  "surfaces": [
+    {
+      "type": "plane",
+      "name": "ground",
+      "point": [
+        0,
+        0,
+        0
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "box_min": [
+        -10000.0,
+        -10000.0,
+        -1.0
+      ],
+      "box_max": [
+        10000.0,
+        10000.0,
+        8.0
+      ]
+    },
+    {
+      "type": "plane",
+      "name": "ceiling",
+      "point": [
+        0,
+        0,
+        16.0
+      ],
+      "normal": [
+        0,
+        0,
+        -1
+      ],
+      "box_min": [
+        -10.0,
+        -2.5,
+        8.0
+      ],
+      "box_max": [
+        10.0,
+        2.5,
+        16.5
+      ]
+    }
+  ]
+}

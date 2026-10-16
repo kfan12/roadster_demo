@@ -77,6 +77,12 @@
   gz_type_name:   "ignition.msgs.Double"
   direction: GZ_TO_ROS
 
+- ros_topic_name: "/roadster/tank/feed_ratio"
+  gz_topic_name:  "/roadster/tank/feed_ratio"
+  ros_type_name:  "std_msgs/msg/Float64"
+  gz_type_name:   "ignition.msgs.Double"
+  direction: GZ_TO_ROS
+
 - ros_topic_name: "/roadster/fan_force"
   gz_topic_name:  "/roadster/fan_force"
   ros_type_name:  "std_msgs/msg/Float64"

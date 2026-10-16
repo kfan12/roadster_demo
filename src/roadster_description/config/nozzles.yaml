@@ -1,10 +1,12 @@
 # Cold-gas nozzle layout for the roadster (10 nozzles, count as reported at the
-# 2026-10-15 unveil; the layout itself is an ASSUMPTION - Tesla published none).
+# 2026-10-15 unveil; the layout itself is an ASSUMPTION - Tesla published none
+# beyond "rear-mounted" (Thrust trim) and "around the perimeter, for upward and
+# rotational movement" (Rocket trim)).
 #
 # Single source of truth: roadster.urdf.xacro loads this file (xacro.load_yaml)
-# to place one TF frame per nozzle, and the thruster plugin (Phase 2, see
-# docs/plans/roadster_demo_plan.md 5.3) will read the same file, so the frames
-# RViz shows are the points the force is applied at.
+# to place one TF frame per nozzle, and both the actuation system and the
+# stunt mission node's allocator read the same file, so the frames RViz shows
+# are the points the force is applied at.
 #
 # Frame: the `chassis` link (x forward, y left, z up; origin = floor-pan center
 # = the chassis COM, 0.33 m above ground at rest).
@@ -13,6 +15,12 @@
 #   f_max_mg    max thrust at the reference feed pressure, as a multiple of the
 #               model's total weight m*g, so the layout scales with mass
 #               (rear pair 2 x 2.25 = 4.5 m g ~ "over 80 kN" at 1,800 kg).
+#
+# Down (+z) and roof (-z) corner nozzles: one side's down pair plus the other
+# side's roof pair is a PURE roll (or pitch) couple with zero net force. The
+# first layout had in-plane side nozzles instead; with only +z nozzles to roll
+# on, a kick flip pushed the car 4.5 m sideways (body z sweeps through the
+# horizontal mid-flip) and added 1.4 m/s of descent (drop test, 2026-10-16).
 nozzles:
   rear_main_left:   {xyz: [-2.25,  0.25, 0.30], force_dir: [1, 0, 0],  f_max_mg: 2.25}
   rear_main_right:  {xyz: [-2.25, -0.25, 0.30], force_dir: [1, 0, 0],  f_max_mg: 2.25}
@@ -20,7 +28,7 @@ nozzles:
   down_front_right: {xyz: [ 1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
   down_rear_left:   {xyz: [-1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
   down_rear_right:  {xyz: [-1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
-  side_front_left:  {xyz: [ 1.90,  0.90, 0.35], force_dir: [0, -1, 0], f_max_mg: 0.45}
-  side_front_right: {xyz: [ 1.90, -0.90, 0.35], force_dir: [0, 1, 0],  f_max_mg: 0.45}
-  side_rear_left:   {xyz: [-1.90,  0.90, 0.35], force_dir: [0, -1, 0], f_max_mg: 0.45}
-  side_rear_right:  {xyz: [-1.90, -0.90, 0.35], force_dir: [0, 1, 0],  f_max_mg: 0.45}
+  roof_front_left:  {xyz: [ 1.90,  0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
+  roof_front_right: {xyz: [ 1.90, -0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
+  roof_rear_left:   {xyz: [-1.90,  0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
+  roof_rear_right:  {xyz: [-1.90, -0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
