@@ -548,10 +548,12 @@
                 <damping>${susp_damping}</damping>
                 <preload>${susp_preload}</preload>
             </suspension>
-            <!-- drive the particle emitters below (rate = level x rate_max per s) -->
+            <!-- drive the particle emitters below (rate = level x rate_max per s,
+               at least 0.1 x rate_max): the nozzle jets need a high rate so
+               even a partial-thrust jet stays one continuous column -->
             <effects>
                 <enabled>$(arg with_effects)</enabled>
-                <rate_max>200</rate_max>
+                <rate_max>2000</rate_max>
                 <fan_rate_max>120</fan_rate_max>
                 <topic_prefix>/roadster/fx</topic_prefix>
             </effects>
@@ -567,27 +569,36 @@
        the live thrust / fan speed on /roadster/fx/<name>. Needs the world to
        load ignition-gazebo-particle-emitter2-system. Attached to base_link
        (the root link sdformat keeps) with explicit poses, so lumping cannot
-       move them. -->
-    <xacro:macro name="fx_emitter" params="name xyz exhaust rgb">
+       move them.
+       Nozzle jets (style jet), after the photographed cold-gas jets
+       (docs/snapshots/tesla_roadster2_thrusters.jpg): a narrow, dense column.
+       Small, fast particles at a high rate overlap heavily; the faint Gaussian
+       texture (jet.png) makes the overlap a bright core with soft edges (a
+       dense texture saturates into a hard white rod), and a narrow speed
+       spread keeps the column smooth (a wide one clumps it into beads).
+       Fan exhaust (style puff): sparse soft puffs (puff.png) that grow into a
+       haze. -->
+    <xacro:macro name="fx_emitter" params="name xyz exhaust rgb style">
+        <xacro:property name="jet" value="${style == 'jet'}" />
         <particle_emitter name="fx_${name}" type="point">
             <pose>${xyz[0]} ${xyz[1]} ${xyz[2] + wheel_radius} 0 ${-atan2(exhaust[2], sqrt(exhaust[0]*exhaust[0] + exhaust[1]*exhaust[1]))} ${atan2(exhaust[1], exhaust[0])}</pose>
             <emitting>false</emitting>
             <size>0.05 0.05 0.05</size>
-            <particle_size>0.4 0.4 0.4</particle_size>
-            <lifetime>0.5</lifetime>
+            <particle_size>${'0.18 0.18 0.18' if jet else '0.4 0.4 0.4'}</particle_size>
+            <lifetime>${0.15 if jet else 0.5}</lifetime>
             <rate>0</rate>
-            <min_velocity>10</min_velocity>
-            <max_velocity>16</max_velocity>
-            <scale_rate>3</scale_rate>
+            <min_velocity>${19 if jet else 10}</min_velocity>
+            <max_velocity>${21 if jet else 16}</max_velocity>
+            <scale_rate>${2 if jet else 3}</scale_rate>
             <color_start>${rgb} 0.9</color_start>
             <color_end>${rgb} 0.0</color_end>
             <topic>/roadster/fx/${name}</topic>
-            <!-- soft round puff (scripts/generate_puff_texture.py) instead of hard squares -->
+            <!-- soft round textures from scripts/generate_puff_texture.py instead of hard squares -->
             <material>
                 <diffuse>1 1 1 1</diffuse>
                 <pbr>
                     <metal>
-                        <albedo_map>$(find roadster_description)/models/fx/puff.png</albedo_map>
+                        <albedo_map>$(find roadster_description)/models/fx/${style}.png</albedo_map>
                     </metal>
                 </pbr>
             </material>
@@ -596,7 +607,8 @@
     <xacro:macro name="fx_nozzles" params="names">
         <xacro:if value="${len(names) > 0}">
             <xacro:fx_emitter name="${names[0]}" xyz="${nozzles[names[0]]['xyz']}"
-                exhaust="${[-c for c in nozzles[names[0]]['force_dir']]}" rgb="0.95 0.95 1.0" />
+                exhaust="${[-c for c in nozzles[names[0]]['force_dir']]}" rgb="0.95 0.95 1.0"
+                style="jet" />
             <xacro:fx_nozzles names="${names[1:]}" />
         </xacro:if>
     </xacro:macro>
@@ -604,9 +616,9 @@
         <gazebo reference="base_link">
             <xacro:fx_nozzles names="${python.sorted(nozzles.keys())}" />
             <xacro:fx_emitter name="fan_left" xyz="${[-1.8, 0.5, 0.7]}"
-                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" />
+                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" style="puff" />
             <xacro:fx_emitter name="fan_right" xyz="${[-1.8, -0.5, 0.7]}"
-                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" />
+                exhaust="${[-0.45, 0.0, 0.89]}" rgb="0.55 0.8 1.0" style="puff" />
         </gazebo>
     </xacro:if>
 

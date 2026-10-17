@@ -50,7 +50,12 @@ FAN_MG = 1.5      # fan f_max as a multiple of m g (roadster.urdf.xacro)
 FAN_VENTS = [((-1.8, 0.5, 0.7), (-0.45, 0.0, 0.89)), ((-1.8, -0.5, 0.7), (-0.45, 0.0, 0.89))]
 PUFF_LIFE = 0.6   # [s]
 AGE_BINS = (0.15, 0.35, PUFF_LIFE)  # puffs drawn in three sizes as they grow
-AGE_SIZE = (0.25, 0.5, 0.85)        # [m]
+# [m] per kind: the nozzle gas stays a narrow dense jet for the first ~2-3 m
+# and only billows at its end (docs/snapshots/tesla_roadster2_thrusters.jpg);
+# the fan exhaust is a haze from the start
+AGE_SIZE = {'gas': (0.16, 0.3, 0.7), 'fan': (0.25, 0.5, 0.85)}
+JET_SPEED = 24.0  # [m/s] gas puff exit speed at full thrust, x sqrt(level)
+JET_RATE = 240.0  # [1/s] gas puffs per firing nozzle (a continuous core at 0.16 m)
 
 
 def quat_rot(q, v):
@@ -370,19 +375,22 @@ class StuntViz(Node):
         return panels
 
     # ------------------------------------------------------------ air flow
-    def spawn(self, origin_ch, direction_ch, level, speed, kind, q, base):
-        """Launch puffs from a chassis-frame exit along a chassis-frame direction."""
+    def spawn(self, origin_ch, direction_ch, n, speed, spread, kind, q, base, dt):
+        """Launch n puffs from a chassis-frame exit along a chassis-frame
+        direction, with direction jitter `spread` and speed jitter 2 x spread.
+        Each is born at a random time within the last tick, from where the
+        exit was then, and moved on by its age, so a jet is a continuous
+        stream instead of one clump per tick."""
         o = quat_rot(q, (origin_ch[0], origin_ch[1], origin_ch[2] + CHASSIS_Z))
         d = quat_rot(q, direction_ch)
-        n = max(1, int(round(level * 4)))
         for _ in range(n):
-            j = [self.rng.uniform(-0.12, 0.12) for _ in range(3)]
-            s = speed * self.rng.uniform(0.8, 1.2)
-            self.puffs.append([base[0] + o[0], base[1] + o[1], base[2] + o[2],
-                               self.car_vel[0] + s * (d[0] + j[0]),
-                               self.car_vel[1] + s * (d[1] + j[1]),
-                               self.car_vel[2] + s * (d[2] + j[2]),
-                               self.rng.uniform(0.0, 0.04), kind])
+            j = [self.rng.uniform(-spread, spread) for _ in range(3)]
+            s = speed * self.rng.uniform(1.0 - 2.0 * spread, 1.0 + 2.0 * spread)
+            jet = [s * (d[i] + j[i]) for i in range(3)]
+            age = self.rng.uniform(0.0, dt)
+            # exit then = exit now - car_vel x age; moved since by (car_vel + jet) x age
+            self.puffs.append([base[i] + o[i] + jet[i] * age for i in range(3)] +
+                              [self.car_vel[i] + jet[i] for i in range(3)] + [age, kind])
 
     def flow(self):
         arr = MarkerArray()
@@ -409,20 +417,25 @@ class StuntViz(Node):
             pf[6] += dt
         self.puffs = [pf for pf in self.puffs if pf[6] < PUFF_LIFE and pf[2] > -0.2]
         if dt > 0:
+            # like the Gazebo jets: a firing nozzle always emits at the full
+            # rate (a thinner stream breaks into beads), thrust sets the speed
+            n_jet = max(1, int(round(JET_RATE * dt)))
             for (xyz, exhaust, k), f in zip(self.nozzle_geo, self.thrust):
                 level = f / (k * mg) if k > 0 else 0.0
                 if level > 0.02:
-                    self.spawn(xyz, exhaust, level, 14.0 + 10.0 * level, 'gas', q, base)
+                    speed = JET_SPEED * math.sqrt(min(max(level, 0.1), 1.0))
+                    self.spawn(xyz, exhaust, n_jet, speed, 0.025, 'gas', q, base, dt)
             fan_level = self.fan / (FAN_MG * mg)
             if fan_level > 0.02:
                 for xyz, d in FAN_VENTS:
-                    self.spawn(xyz, d, fan_level, 6.0, 'fan', q, base)
+                    self.spawn(xyz, d, max(1, int(round(fan_level * 4))), 6.0, 0.12,
+                               'fan', q, base, dt)
 
         # puffs: one SPHERE_LIST per (kind, age bin) so they grow as they age
         for ki, (kind, rgb) in enumerate((('gas', (0.95, 0.95, 1.0)),
                                           ('fan', (0.45, 0.75, 1.0)))):
             lo = 0.0
-            for bi, (hi, size) in enumerate(zip(AGE_BINS, AGE_SIZE)):
+            for bi, (hi, size) in enumerate(zip(AGE_BINS, AGE_SIZE[kind])):
                 m = Marker()
                 m.header.frame_id = 'odom'
                 m.ns = f'puffs_{kind}'

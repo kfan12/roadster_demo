@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""generate_puff_texture.py - soft round particle texture for the plume effects.
+"""generate_puff_texture.py - soft round particle textures for the plume effects.
 
-Writes roadster_description/models/fx/puff.png: 64 x 64 RGBA, white, with a
-smooth radial alpha falloff, so Gazebo particles read as soft gas puffs instead
-of hard squares. Pure-stdlib PNG writer (no numpy / cv2: the venv's NumPy 2
-breaks cv2 on this machine, CLAUDE.md).
+Writes into roadster_description/models/fx/, each 64 x 64 RGBA, white, with a
+smooth radial alpha falloff, so Gazebo particles read as gas instead of hard
+squares:
+  puff.png  dense core, soft edge: the fan exhaust's sparse puffs
+  jet.png   faint Gaussian (peak alpha 0.25): the nozzle jets, where a dozen
+            or more particles overlap at every point, so the sum builds a
+            bright narrow core while the edges stay soft (a denser texture
+            saturates into a hard-edged white rod)
+Pure-stdlib PNG writer (no numpy / cv2: the venv's NumPy 2 breaks cv2 on this
+machine, CLAUDE.md).
 
   python3 scripts/generate_puff_texture.py
 """
@@ -27,19 +33,32 @@ def png(width, height, rows):
             chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b''))
 
 
-def main():
+def puff_alpha(r):
+    return max(0.0, 1.0 - r) ** 1.6  # soft edge, dense core
+
+
+def jet_alpha(r):
+    # Gaussian (sigma 0.35 of the radius), pulled to zero at the rim
+    return 0.25 * math.exp(-0.5 * (r / 0.35) ** 2) * max(0.0, 1.0 - r ** 4)
+
+
+def texture(alpha):
     rows = []
     c = (N - 1) / 2
     for y in range(N):
         row = []
         for x in range(N):
             r = math.hypot(x - c, y - c) / c
-            a = max(0.0, 1.0 - r) ** 1.6  # soft edge, dense core
-            row += [255, 255, 255, int(round(255 * a))]
+            row += [255, 255, 255, int(round(255 * alpha(r)))]
         rows.append(row)
+    return png(N, N, rows)
+
+
+def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / 'puff.png').write_bytes(png(N, N, rows))
-    print(f'wrote {OUT / "puff.png"}')
+    for name, alpha in (('puff.png', puff_alpha), ('jet.png', jet_alpha)):
+        (OUT / name).write_bytes(texture(alpha))
+        print(f'wrote {OUT / name}')
 
 
 if __name__ == '__main__':

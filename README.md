@@ -10,7 +10,7 @@ The car model was derived from the sedan in [kfan12/vlm_av_ws](https://github.co
 
 Demo A, the inverted ramp:
 
-https://github.com/user-attachments/assets/da463c21-0af6-4663-8d04-b17aed2fd3d3
+https://github.com/user-attachments/assets/4eaea480-e1dd-41d7-8e14-943df34c0ef5
 
 | Drive-off, upside down (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
 | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/da463c21-0af6-4663-8d04-b17aed2fd3d3
 
 Demo B, the obstacle hop:
 
-https://github.com/user-attachments/assets/bfa47f27-5f0f-41f2-85e0-db22c638e93d
+https://github.com/user-attachments/assets/a52a0780-4d06-4f04-809e-7f65552e71cb
 
 | Lift burn (trackside camera) | Upside down mid-roll, over the row | Landing burn past the row | Mid-roll (onboard camera) |
 | --- | --- | --- | --- |
@@ -163,7 +163,7 @@ Unit tests (actuation models, attitude and landing control, allocator, hop plann
 colcon test && colcon test-result --verbose
 ```
 
-In RViz the car carries orange thrust arrows (one per nozzle, length proportional to thrust), white exhaust puffs and blue fan exhaust trailing in the air, a fan disc that glows with fan speed, IMU arrows (specific force, angular rate), control arrows (requested and allocated thrust, requested torque, per-wheel drive and brake torque), the true and estimated paths, mission, control and IMU panels, and the trackside and onboard camera views.
+In RViz the car carries orange thrust arrows (one per nozzle, length proportional to thrust), narrow white exhaust jets that billow out at their ends, blue fan exhaust trailing in the air, a fan disc that glows with fan speed, IMU arrows (specific force, angular rate), control arrows (requested and allocated thrust, requested torque, per-wheel drive and brake torque), the true and estimated paths, mission, control and IMU panels, and the trackside and onboard camera views.
 Gazebo shows the same thrust and fan plumes as particle effects.
 
 ## Result
