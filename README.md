@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/da463c21-0af6-4663-8d04-b17aed2fd3d3
 
 Demo B, the obstacle hop:
 
-https://github.com/user-attachments/assets/7c21d29e-240e-405e-8caf-2ef157f3b097
+https://github.com/user-attachments/assets/bfa47f27-5f0f-41f2-85e0-db22c638e93d
 
 | Lift burn (trackside camera) | Upside down mid-roll, over the row | Landing burn past the row | Mid-roll (onboard camera) |
 | --- | --- | --- | --- |
