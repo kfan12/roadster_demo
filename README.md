@@ -8,15 +8,17 @@ A ROS 2 (Humble) + Gazebo (Ignition Fortress) simulation of the three stunts fro
 It is a plausible engineering reproduction built on public reporting, not a replica of Tesla's hardware or controller: the nozzle layout, fan force, mass and ramp size are assumptions (see `docs/plans/roadster_demo_plan.md` for sources, confidence and the full plan).
 The car model was derived from the sedan in [kfan12/vlm_av_ws](https://github.com/kfan12/vlm_av_ws), where this work started as a branch; that repository's history is kept here, but the autonomous-driving stack itself now lives only there.
 
-https://github.com/user-attachments/assets/da463c21-0af6-4663-8d04-b17aed2fd3d3
-
 Demo A, the inverted ramp:
+
+https://github.com/user-attachments/assets/da463c21-0af6-4663-8d04-b17aed2fd3d3
 
 | Drive-off, upside down (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
 | --- | --- | --- | --- |
 | ![Drive-off](docs/snapshots/roadster_driveoff_trackside.png) | ![Flip](docs/snapshots/roadster_flip_trackside.png) | ![Landing](docs/snapshots/roadster_landing_trackside.png) | ![Onboard](docs/snapshots/roadster_flip_onboard.png) |
 
 Demo B, the obstacle hop:
+
+https://github.com/user-attachments/assets/7c21d29e-240e-405e-8caf-2ef157f3b097
 
 | Lift burn (trackside camera) | Upside down mid-roll, over the row | Landing burn past the row | Mid-roll (onboard camera) |
 | --- | --- | --- | --- |
