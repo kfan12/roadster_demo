@@ -23,10 +23,12 @@ stunt_mission_node:
     brake_accel: 14.7            # 1.5 g constant-deceleration profile ...
     flare_height: 1.0            # ... down to this COM height above standing [m], then
     flare_accel: 19.6            # a 2 g flare (3 m g of the ~4 m g lift: 1 m g left to correct with) ...
-    touchdown_speed: 1.0         # ... to this at touchdown_height [m/s]; the decaying thrust takes
-                                 # off ~0.4 more: lands at ~0.6 (0.5 here landed at 0.4 but used 8 kg
-                                 # more gas and left the tank out of regulation at touchdown)
-    touchdown_height: 0.05       # COM above standing [m]: the hanging wheels touch at ~0.02
+    touchdown_speed: 0.7         # ... to this at touchdown_height, then held to the ground [m/s]
+    touchdown_height: 0.08       # COM above standing [m]. The hanging wheels touch at ~0.02, and
+                                 # the IMU-only height drifts +-3 cm over a 2.7 s flight: with 0.05
+                                 # and a profile still falling through it, a 3 cm high estimate
+                                 # touched down at 1.1 m/s (final_hop_imu4); this holds a
+                                 # constant-speed segment across the whole error band
     thrust_fall_time: 0.02       # nozzle valve fall lag (xacro tau_fall_s): the flare ends this early
     brake_kv: 3.0
     flare_kv: 10.0               # [1/s] stiffer in the flare, where errors grow fast
@@ -68,6 +70,36 @@ stunt_mission_node:
     steer_max: 0.3               # [rad]
     steer_enable: false          # straight track, no disturbance: hold the wheels straight
     fan_spinup_distance: 6.0     # start the fans this far before the ramp (~1 s) [m]
+
+    ready_time: 2.0              # launch / hop: stand on the line first, parking brake on, so the
+                                 # estimator calibrates its accelerometer bias at standstill [s]
+    # launch mode (Demo C, roadster_launch): tyres at their traction limit plus a
+    # constant rear throttle to 60 mph; fitted to the reported 0-60 in 0.81 s
+    launch_throttle: 0.585       # of the four rear nozzles' 4.5 m g
+    launch_speed: 26.8224        # 60 mph [m/s]: rear thrust off
+    launch_brake_decel: 8.0      # then brake to a stop on the tyres [m/s^2]
+
+    # hop mode (Demo B, roadster_hop): plan from the world's obstacle row
+    # (hop_planner.hpp), approach on the wheels, lift burn, ballistic arc, landing
+    hop_speed: 15.0              # approach and flight speed [m/s]
+    hop_accel: 4.0               # approach acceleration on the tyres [m/s^2]
+    hop_burn_accel: 24.5         # lift burn net upward acceleration (3.5 m g of the ~4 m g) [m/s^2]:
+                                 # a harder, shorter burn loses less to gravity; with the flip
+                                 # 1.5 g planned 59.2 kN.s, over the 57.3 allowed (hop_sweep)
+    hop_clearance: 1.15          # planned, over every vehicle [m]: the plan target is 1.0 (minimum
+                                 # 0.5), and the flown flip hop came in 0.13 m under its plan (the
+                                 # real roll lifts a little less than the ideal one-pair model)
+    hop_half_length: 2.3         # COM to the bumpers [m]
+    hop_bottom_below_com: 0.40   # the hanging wheels' bottom under the COM in flight [m]
+    hop_flip_turns: 1.0          # 360 deg roll over the row (0 = a level hop)
+    hop_flip_duration: 1.6       # [s]: peak 0.64 m g on one bottom pair, ~33 kg of gas; plan
+                                 # 56.1 kN.s, flip ends 0.44 s before the landing burn
+    hop_roll_lever: 0.75         # bottom nozzles' y offset (nozzles.yaml) [m]
+    hop_half_width: 0.93         # rolled-car clearance: the wheels' outer faces ... [m]
+    hop_roof_above_com: 0.93     # ... and the cabin roof above the COM [m]
+    exhaust_velocity: 350.0      # must match the xacro nozzle_defaults [m/s]
+    tank_regulation_mass: 68.0   # air left when the tank drops out of regulation (measured) [kg]
+    impulse_reserve_frac: 0.9    # reject a hop plan needing more than this of the usable impulse
 
     alloc_lambda: 1.0e-4         # valve-opening penalty (saves gas)
     # [Fx(world) Fy(world) Fz(world) Tx Ty Tz(body)] priorities. Flight: torque first,

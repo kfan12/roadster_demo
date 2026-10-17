@@ -68,7 +68,13 @@ public:
   {
     const double v_down = -vz;
     const double err = v_down - profileSpeed(h);
-    if (!active_ && err >= 0.0) {
+    const double hp = h - p_.touchdown_height;  // height in the profile
+    const bool flare = hp - std::max(v_down, 0.0) * p_.flare_lead_time < p_.flare_height;
+    const double a = hp <= 0.0 ? 0.0 : (flare ? p_.flare_accel : p_.brake_accel);
+    // latch lead_time early too: the thrust takes that long to rise, and over
+    // it the car gains (g + a) lead_time on the profile. A long fall wins that
+    // back before the flare; the hop's 2 m one touched down at 1.1 m/s (hop_imu2)
+    if (!active_ && err >= -(p_.gravity + a) * p_.flare_lead_time) {
       active_ = true;
     }
     if (!active_) {
@@ -77,9 +83,6 @@ public:
     // the deceleration feed-forward only while really coming down: after a
     // bounce (rising) it kept ~0.9 m g of thrust on and the car hovered at
     // 0.9 m until the tank ran dry (drop run est_shadow3, 2026-10-16)
-    const double hp = h - p_.touchdown_height;  // height in the profile
-    const bool flare = hp - std::max(v_down, 0.0) * p_.flare_lead_time < p_.flare_height;
-    const double a = hp <= 0.0 ? 0.0 : (flare ? p_.flare_accel : p_.brake_accel);
     const double a_ff = v_down > 0.5 * p_.touchdown_speed + a * p_.thrust_fall_time ? a : 0.0;
     const double f = mass * (p_.gravity + a_ff + (flare ? p_.flare_kv : p_.k_v) * err);
     return std::clamp(f, 0.0, f_max);

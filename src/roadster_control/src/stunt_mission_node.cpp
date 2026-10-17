@@ -13,6 +13,30 @@
 // Mode "drop" (the flight half on its own): the car starts upside down under a
 // ceiling held by its fan, the same state as HOLD_INVERTED:
 //   HOLD           fan on, wait hold_time
+// Modes "launch" and "hop" start with
+//   READY          standing on the line, parking brake on, for ready_time: the
+//                  car settles from its spawn drop onto its springs, and the
+//                  state estimator calibrates its accelerometer bias at
+//                  standstill (the hop's 2.5 s IMU-only flight without it
+//                  ended 3.5 cm off in height, touching down at 1.2 m/s)
+// Mode "launch" (Demo C, the straight launch):
+//   LAUNCH         wheels at their traction limit plus the rear nozzles at
+//                  launch_throttle, until launch_speed (60 mph)
+//   ROLLOUT        thrust off, brake to a stop at launch_brake_decel
+// Mode "hop" (Demo B, the obstacle hop; obstacles from the world JSON):
+//   APPROACH       drive to hop_speed and on, until the COM reaches the burn
+//                  start of the plan (hop_planner.hpp), made at startup
+//   HOP_BURN       bottom nozzles lift the car at hop_burn_accel, attitude held
+//                  level, until the climb reaches the plan's burn-end speed
+//   BALLISTIC      over the row: a minimum-jerk roll of hop_flip_turns turns
+//                  (360 deg) in hop_flip_duration, then held upright
+//   ...then LAND_BRAKE and the rest of the flight sequence below
+//   A plan whose impulse estimate is over impulse_reserve_frac of the usable
+//   gas, or whose flip would not end before the landing burn, is rejected
+//   before the burn: ABORT, brake to a stop on the wheels.
+// No mode starts without /joint_states (ros2_control up): a run whose
+// controllers failed to configure drove nowhere while the mission, on a
+// diverged estimate, lifted off at the start line (td_hop_imu3).
 // Flight sequence (both modes):
 //   RELEASE        fan off, hold the start attitude while the car falls clear
 //   FLIP           track a minimum-jerk rotation of flip_turns turns about the
@@ -58,6 +82,7 @@
 
 #include "roadster_control/allocator.hpp"
 #include "roadster_control/attitude.hpp"
+#include "roadster_control/hop_planner.hpp"
 #include "roadster_control/landing.hpp"
 
 namespace roadster_control
@@ -110,6 +135,7 @@ public:
     lp.flare_lead_time = declare_parameter<double>("flare_lead_time", lp.flare_lead_time);
     lp.touchdown_height = declare_parameter<double>("touchdown_height", lp.touchdown_height);
     lp.thrust_fall_time = declare_parameter<double>("thrust_fall_time", lp.thrust_fall_time);
+    t_fall_ = lp.thrust_fall_time;
     lateral_kv_ = declare_parameter<double>("lateral_kv", 2.0);
     landing_ = std::make_unique<LandingBrake>(lp);
     landed_load_ = declare_parameter<double>("landed_load", 0.1);
@@ -148,11 +174,38 @@ public:
     steer_max_ = declare_parameter<double>("steer_max", 0.3);
     steer_enable_ = declare_parameter<bool>("steer_enable", false);
     fan_lead_ = declare_parameter<double>("fan_spinup_distance", 6.0);
+    rollout_decel_ = stop_decel_;
+    // launch mode (Demo C)
+    ready_time_ = declare_parameter<double>("ready_time", 2.0);
+    launch_throttle_ = declare_parameter<double>("launch_throttle", 0.585);
+    launch_speed_ = declare_parameter<double>("launch_speed", 26.8224);
+    launch_brake_decel_ = declare_parameter<double>("launch_brake_decel", 8.0);
+    // hop mode (Demo B)
+    hop_.speed = declare_parameter<double>("hop_speed", hop_.speed);
+    hop_accel_ = declare_parameter<double>("hop_accel", 4.0);
+    hop_.burn_accel = declare_parameter<double>("hop_burn_accel", hop_.burn_accel);
+    hop_.clearance = declare_parameter<double>("hop_clearance", hop_.clearance);
+    hop_.half_length = declare_parameter<double>("hop_half_length", hop_.half_length);
+    hop_.bottom_below_com = declare_parameter<double>("hop_bottom_below_com",
+        hop_.bottom_below_com);
+    hop_.com_rest_height = landed_com_height_;
+    hop_.flip_turns = declare_parameter<double>("hop_flip_turns", 1.0);
+    hop_.flip_duration = declare_parameter<double>("hop_flip_duration", hop_.flip_duration);
+    hop_.roll_lever = declare_parameter<double>("hop_roll_lever", hop_.roll_lever);
+    hop_.half_width = declare_parameter<double>("hop_half_width", hop_.half_width);
+    hop_.roof_above_com = declare_parameter<double>("hop_roof_above_com", hop_.roof_above_com);
+    hop_.roll_inertia = inertia_(0, 0);
+    hop_.brake_accel = lp.brake_accel;
+    exhaust_velocity_ = declare_parameter<double>("exhaust_velocity", 350.0);
+    tank_regulation_mass_ = declare_parameter<double>("tank_regulation_mass", 68.0);
+    impulse_reserve_frac_ = declare_parameter<double>("impulse_reserve_frac", 0.9);
 
     loadNozzles(declare_parameter<std::string>("nozzles_file", ""));
     const std::string world_json = declare_parameter<std::string>("world_json", "");
     if (mode_ == "ramp") {
       loadRamp(world_json);
+    } else if (mode_ == "hop") {
+      loadHop(world_json);
     }
 
     pub_thr_ = create_publisher<ros_gz_interfaces::msg::Float32Array>("/roadster/thruster_cmd", 10);
@@ -183,6 +236,7 @@ public:
     }
     sub_js_ = create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 50, [this](sensor_msgs::msg::JointState::SharedPtr m) {
+        js_seen_ = true;
         for (std::size_t k = 0; k < m->name.size() && k < m->position.size(); ++k) {
           for (std::size_t i = 0; i < 4; ++i) {
             if (m->name[k] == kWheelJoint[i]) {
@@ -263,6 +317,45 @@ private:
       s_hold_, s_release_, s_release_ - s_hold_);
   }
 
+  void loadHop(const std::string & path)
+  {
+    std::ifstream f(path);
+    if (!f) {
+      throw std::runtime_error("hop mode needs world_json, cannot open '" + path + "'");
+    }
+    const auto j = nlohmann::json::parse(f).at("geometry");
+    if (j.at("kind") != "hop") {
+      throw std::runtime_error(path + " is not a hop world");
+    }
+    std::vector<HopObstacle> row;
+    for (const auto & o : j.at("obstacles")) {
+      const double cx = o.at("center")[0], cz = o.at("center")[2];
+      const double sx = o.at("size")[0], sz = o.at("size")[2];
+      row.push_back({cx - sx / 2.0, cx + sx / 2.0, cz + sz / 2.0});
+    }
+    hop_plan_ = planHop(row, hop_, mass_);
+    RCLCPP_INFO(get_logger(), "hop plan at %.1f m/s: apex %.2f m (COM above standing) at "
+      "x = %.2f, burn %.3f s at %.2f m/s^2 from x = %.2f; impulse up %.1f + landing %.1f "
+      "+ flip %.1f kN.s", hop_.speed, hop_plan_.apex_height, hop_plan_.apex_x,
+      hop_plan_.burn_time, hop_.burn_accel, hop_plan_.burn_start_x, hop_plan_.up_impulse / 1e3,
+      hop_plan_.landing_impulse / 1e3, hop_plan_.flip_impulse / 1e3);
+    RCLCPP_INFO(get_logger(), "hop plan: clearance %.2f m (per vehicle in driving order:%s); "
+      "flip %.2f turns in %.2f s from the burn end, deepest point %.2f m under the COM over "
+      "the row, ends at %.2f s, landing burn at %.2f s", hop_plan_.clearance,
+      [this] {
+        std::string c;
+        for (double x : hop_plan_.clearances) {
+          c += " " + std::to_string(x).substr(0, 4);
+        }
+        return c;
+      }().c_str(), hop_.flip_turns, hop_.flip_duration, hop_plan_.max_depth,
+      hop_plan_.flip_end_time, hop_plan_.brake_latch_time);
+    if (!hop_plan_.ok) {
+      RCLCPP_ERROR(get_logger(), "no valid hop plan for %s (row not cleared, or the flip "
+        "would not end before the landing burn): the mission will not lift off", path.c_str());
+    }
+  }
+
   // distance along the track at base_link (which sits on the driving surface):
   // run-in (< 0), the arc (0 .. arc length), then the overhang
   double pathS(const Vec3 & p) const
@@ -320,7 +413,7 @@ private:
   bool flying() const
   {
     return state_ == "RELEASE" || state_ == "FLIP" || state_ == "DESCENT" ||
-           state_ == "LAND_BRAKE";
+           state_ == "LAND_BRAKE" || state_ == "HOP_BURN" || state_ == "BALLISTIC";
   }
 
   void startFlight(const Quat & q, double t, std::optional<double> delay = std::nullopt)
@@ -378,10 +471,21 @@ private:
     if (!mission_started_ && t - *first_t_ < start_delay_) {
       return;  // let ros2_control and the viewers come up first
     }
+    if (!mission_started_ && !js_seen_) {
+      if (t - *first_t_ > 15.0) {
+        RCLCPP_ERROR(get_logger(), "no /joint_states after 15 s: ros2_control is not up "
+          "(controllers failed to configure?), not starting");
+        mission_started_ = true;
+        t_mission0_ = t;
+        enter("ABORT", t);
+      }
+      return;
+    }
     if (!mission_started_) {
       mission_started_ = true;
       t_mission0_ = t;
-      enter(mode_ == "ramp" ? "ACCELERATE" : "HOLD", t);
+      enter(mode_ == "ramp" ? "ACCELERATE" :
+        mode_ == "launch" || mode_ == "hop" ? "READY" : "HOLD", t);
     }
     const double ts = t - t_state0_;
     const double tm = t - t_mission0_;
@@ -490,6 +594,53 @@ private:
         launch_u_ = 0.0;
         startFlight(q, t, drive_off_flip_delay_);
       }
+    } else if (state_ == "READY") {
+      drive = true;  // parked (see the parking brake below)
+      if (ts >= ready_time_) {
+        enter(mode_ == "launch" ? "LAUNCH" : "APPROACH", t);
+      }
+    } else if (state_ == "LAUNCH") {
+      // Demo C: the tyres at their traction limit (the speed loop's
+      // feed-forward asks for more than traction control lets through) plus a
+      // constant rear throttle; thrust off at 60 mph, on the unfiltered speed
+      drive = true;
+      v_ref = launch_speed_;
+      a_ff = 3.0 * kG;
+      launch_u_ = launch_throttle_;
+      if (v_body.x() >= launch_speed_) {
+        launch_u_ = 0.0;
+        rollout_v0_ = std::max(speed_, 0.0);
+        rollout_decel_ = launch_brake_decel_;
+        enter("ROLLOUT", t);
+      }
+    } else if (state_ == "APPROACH") {
+      // Demo B: on the wheels up to the hop speed, then lift off at the plan's
+      // burn start - unless the plan needs more gas than is usable
+      drive = true;
+      v_ref = std::min(hop_.speed, hop_accel_ * ts);
+      a_ff = v_ref < hop_.speed ? hop_accel_ : 0.0;
+      const double usable = std::max(tank_mass_ - tank_regulation_mass_, 0.0) * exhaust_velocity_;
+      const double need = hop_plan_.up_impulse + hop_plan_.landing_impulse +
+        hop_plan_.flip_impulse;
+      if (!hop_plan_.ok) {
+        enter("ABORT", t);
+      } else if (tank_mass_ > 0.0 && need > impulse_reserve_frac_ * usable) {
+        RCLCPP_ERROR(get_logger(), "hop plan needs %.1f kN.s, over %.0f%% of the %.1f kN.s "
+          "usable: not lifting off", need / 1e3, 100 * impulse_reserve_frac_, usable / 1e3);
+        enter("ABORT", t);
+      } else if (com.x() >= hop_plan_.burn_start_x) {
+        if (std::abs(speed_ - hop_.speed) > 0.5) {
+          RCLCPP_WARN(get_logger(), "lifting off at %.2f m/s, planned for %.2f", speed_,
+            hop_.speed);
+        }
+        // level attitude hold through the hop: a zero-angle "flip"
+        flip_ = std::make_unique<FlipReference>(q, flip_axis_, 0.0, t, flip_duration_);
+        roll_progress_ = 0.0;
+        enter("HOP_BURN", t);
+      }
+    } else if (state_ == "ABORT") {
+      drive = true;  // on the wheels: brake to a stop (no traction in the air)
+      v_ref = 0.0;
     } else if (state_ == "LANDED" || state_ == "ROLLOUT" || state_ == "STOPPED") {
       // on the wheels again: brake the touchdown speed away, keep straight
       drive = true;
@@ -499,8 +650,8 @@ private:
       }
       if (state_ == "ROLLOUT") {
         const double tt = t - t_state0_;
-        v_ref = std::max(rollout_v0_ - stop_decel_ * tt, 0.0);
-        a_ff = v_ref > 0.0 ? -stop_decel_ : 0.0;
+        v_ref = std::max(rollout_v0_ - rollout_decel_ * tt, 0.0);
+        a_ff = v_ref > 0.0 ? -rollout_decel_ : 0.0;
         if (v_ref <= 0.0) {
           // braking profile done: hold this spot (a speed-only loop let the
           // integral overshoot and creep backwards at 0.2 m/s)
@@ -529,12 +680,29 @@ private:
       const auto ref = flip_->at(t);
       tau = attitudeTorque(inertia_, gains_, q, w, ref.q, ref.w, ref.alpha);
       att_err = attitudeError(ref.q, q).norm();
-      f_up = landing_->upForce(h, vz, mass_, 0.9 * upCapacity(R) * *feed_ratio_);
-      if (landing_->active() && state_ != "LAND_BRAKE") {
-        enter("LAND_BRAKE", t);
-      }
-      if (landing_->active()) {
+      const double f_cap = 0.9 * upCapacity(R) * *feed_ratio_;
+      if (state_ == "HOP_BURN") {
+        // lift at the planned net acceleration until the climb has the
+        // plan's burn-end speed, counting what the decaying thrust still
+        // adds: thrust rise lag and feed changes then lengthen the burn
+        // instead of costing height
+        f_up = std::min(mass_ * (kG + hop_.burn_accel), f_cap);
         weights = w_brake_;
+        const double v_end = vz + (kG + hop_.burn_accel) * t_fall_;
+        if (v_end >= hop_plan_.burn_vz || t - t_state0_ > 1.5 * hop_plan_.burn_time) {
+          // the flip (a zero-angle one without): from here, about the body roll axis
+          flip_ = std::make_unique<FlipReference>(q, flip_axis_,
+            2.0 * M_PI * hop_.flip_turns, t, hop_.flip_duration);
+          enter("BALLISTIC", t);
+        }
+      } else {
+        f_up = landing_->upForce(h, vz, mass_, f_cap);
+        if (landing_->active() && state_ != "LAND_BRAKE") {
+          enter("LAND_BRAKE", t);
+        }
+        if (landing_->active()) {
+          weights = w_brake_;
+        }
       }
       // touchdown = wheel contact while upright (force/torque sensors; an
       // airborne wheel reads negative), with a low estimated height as the
@@ -573,7 +741,7 @@ private:
       // damped against its own rotation. The speed loop alone gave ~5 N.m at
       // a 2 cm/s creep, and the car stopped near the arc seam rolled back
       // 3 cm through the hold (imu_shortstop1).
-      const bool parked = state_ == "HOLD_INVERTED" || state_ == "STOPPED";
+      const bool parked = state_ == "HOLD_INVERTED" || state_ == "STOPPED" || state_ == "READY";
       for (std::size_t i = 0; i < 4; ++i) {
         const double cap = tc_k_ * tire_mu_ * std::max(wheelNormal(i), 0.0) * wheel_radius_;
         const double tau = parked ? -park_brake_ * wheel_rate_[i] : f / 4.0 * wheel_radius_;
@@ -598,15 +766,34 @@ private:
     if (flying() && state_ != "LANDED") {
       // forces requested and weighted in WORLD axes (lift up, brake the
       // lateral drift, no forward push whatever the attitude), torques in body axes
-      w_des.head<3>() = Vec3(0, -mass_ * lateral_kv_ * vy_, f_up);
+      double kv = lateral_kv_;
+      if (state_ == "BALLISTIC" && t < flip_->endTime() &&
+        std::abs(hop_.flip_turns - std::round(hop_.flip_turns)) < 1e-9)
+      {
+        // A whole-turn roll's sideways pushes cancel: the first half's bottom
+        // pair pushes one way, the second half's the other, so the excursion
+        // in between is left alone (braked after the roll). Its upward push is
+        // the lift the hop plan counts on, so it is not nulled either: with a
+        // world-Fz weight the allocator fired a side nozzle at full thrust
+        // (tilted, it pushes down) against it, 6.5-7.5 kN.s of side thrust
+        // that cost apex, clearance (0.62 m) and a 5.7 m/s sideways excursion
+        // (flip_hop_imu3, flip_hop_imu4).
+        kv = 0.0;
+        weights(1) = 0.0;
+        weights(2) = 0.0;
+      }
+      w_des.head<3>() = Vec3(0, -mass_ * kv * vy_, f_up);
       w_des.tail<3>() = tau;
       a = alloc_->solve(w_des, weights, *feed_ratio_, lambda_, R);
       a.achieved.head<3>() = R * a.achieved.head<3>();  // report in the same axes
     }
-    if (state_ == "DRIVE_OFF") {
+    if (state_ == "DRIVE_OFF" || state_ == "LAUNCH") {
+      // rear thrust: the assist off the overhang, or Demo C's launch burn
       for (int i : rear_idx_) {
-        a.u(i) = launch_u_;  // rear thrust assist for the launch off the overhang
+        a.u(i) = launch_u_;
       }
+      w_des(0) = launch_u_ * rear_f_max_ * *feed_ratio_;  // body x, commanded
+      a.achieved(0) = w_des(0);
     }
     ros_gz_interfaces::msg::Float32Array cmd;
     for (int i = 0; i < a.u.size(); ++i) {
@@ -674,6 +861,12 @@ private:
   std::unique_ptr<LandingBrake> landing_;
   double landed_load_, landed_height_, mission_timeout_, start_delay_;
   double lateral_kv_;           // [1/s] flight lateral velocity damping
+  double t_fall_ = 0.0;         // nozzle valve fall lag [s]
+  double rollout_decel_ = 3.0;  // ROLLOUT braking [m/s^2]
+  double ready_time_, launch_throttle_, launch_speed_, launch_brake_decel_;
+  HopParams hop_;
+  HopPlan hop_plan_;
+  double hop_accel_, exhaust_velocity_, tank_regulation_mass_, impulse_reserve_frac_;
   std::string odom_topic_;
   bool use_odom_twist_;
   std::optional<double> first_t_;
@@ -706,6 +899,7 @@ private:
   std::array<double, 4> wheel_angle_{0, 0, 0, 0}, wheel_rate_{0, 0, 0, 0};
   double roll_progress_ = 0.0;
   bool mission_started_ = false;
+  bool js_seen_ = false;
   double t_mission0_ = 0.0, t_state0_ = 0.0;
   std::string state_ = "WAIT";
   std::unique_ptr<FlipReference> flip_;

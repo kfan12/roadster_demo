@@ -336,6 +336,48 @@ Known gaps, not blocking Demo A:
 - No rear nozzle door, no plume visuals and no video calibration yet (Phase 8); ramp radius and fan force are assumptions until then.
 - The zero-g test failed once in 13 runs, unexplained and not reproduced since; it now refuses to run with another thruster publisher alive.
 
+### Demo C status (2026-10-17): done in simulation (Phase 3)
+
+World `roadster_launch` (generator `--kind launch`: a straight runway, a mark every 10 m), mission mode `launch`, `ros2 launch roadster_control demo_c.launch.py`; scored with `scripts/run_stunt_scenario.sh roadster_launch launch`.
+The car stands on the line for 2 s, then launches on the tyres at their traction limit plus the four rear nozzles at a constant throttle, cut at 60 mph, then brakes to a stop at 8 m/s^2.
+Mass is held at nominal and the throttle is fitted: 58.5% of the rear 4.5 m g, 47.5 kN (the Section 2 estimate was about 50% and 39 kN, assuming 21 kN from the tyres; traction control lets about 12 kN through with the load transfer).
+
+| Check (Phase 3 exit criteria) | Result |
+| --- | --- |
+| 0-60 mph in 0.81 +- 0.05 s | 0.810-0.815 s, over 10.7-10.8 m |
+| Plant tracks the commanded rear thrust within 5% | 2.2% (after the valves' 20 ms rise) |
+| Impulse within 25% of 32 kN.s | 37.0-37.3 kN.s (+16%), 110 kg of gas |
+| Yaw error under 2 deg | 0.000 deg |
+
+Not done: the rear-door sequencing (there is no rear nozzle door in the model).
+A launch started at sim time 0 began before the car had settled from its spawn drop and took 0.865 s; the `READY` hold on the line fixed that.
+
+### Demo B status (2026-10-17): done in simulation (Phase 6), with a 360 deg flip
+
+World `roadster_hop` (generator `--kind hop`): Model 3, Model Y, Semi (4.1 m), Cybertruck and Cybercab as boxes of their outer size, parked side by side across the runway (the Semi in the middle), and a 12 m wide landing zone past them; mission mode `hop`, `ros2 launch roadster_control demo_b.launch.py`; scored with `scripts/run_stunt_scenario.sh roadster_hop hop`.
+Sequence: 2 s on the line, approach on the tyres to 15 m/s, a 2.5 g lift burn of about 0.33 s from about 20 m before the row, a 360 deg minimum-jerk roll in 1.6 s over the row, then the landing burn and flare.
+The planner (`hop_planner.hpp`, Section 5.8 hop mode) flies the plan: it integrates the climb (burn, the roll's own thrust, gravity) with the roll angle, finds the burn start that keeps the rolled car's lowest corner the clearance above every vehicle while over it, bisects for the shortest burn, and rejects the plan if the roll would not end before the landing burn or its impulse estimate is over 90% of the usable gas.
+
+| Check (Phase 6 exit criteria) | Result, 2 runs |
+| --- | --- |
+| Clearance over the Semi >= 0.5 m (target 1.0 m) | 1.02 and 1.12 m (2.9-3.4 m over the other four) |
+| Upright landing per Phase 5 limits | 0.40 and 0.51 m/s, tilt under 0.1 deg, 1.89 g peak |
+| Flip | 360.0 deg |
+| Gas | 171-173 kg, tank regulated to touchdown |
+
+Findings:
+- With no roof nozzles the roll comes from one side's bottom pair at a time, and the torque peaks while the car is nearly upright, so the roll lifts; a closed-form plan (an apex parabola, the roll's lift as one kick at the burn end) cleared a box by 0.65 m instead of 1.0 m when flown, so the planner now integrates the trajectory instead.
+- A rolled car reaches lower than its wheels: a roof corner can be 1.3 m under the COM against 0.4 m upright, and the planner uses the depth at the planned roll angle over each vehicle.
+- A whole-turn roll's sideways pushes cancel (the halves use opposite pairs), so the lateral brake and the world-Fz weight are off during it: nulling the roll's lift fired a side nozzle at full thrust (tilted, it pushes down), 6.5-7.5 kN.s, a third of the flip's gas, and cost apex and clearance.
+- The flip at the default 1.5 g lift burn planned 59.2 kN.s against the 57.3 allowed and was rejected on the ground; a 2.5 g burn loses less to gravity and fits (56.1 kN.s).
+- The flown flip hop came in 0.13 m under its plan (the real roll lifts a little less than the ideal one-pair model), so the planner aims for 1.15 m.
+- The landing burn now latches 40 ms early (the hop's 2 m braking fall touched down at 1.1 m/s), and the profile ends in a constant 0.7 m/s segment over the last 8 cm: the IMU-only height drifts +-3 cm over a 2.5 s flight, and with the profile still falling through that band a high estimate touched down at 1.1 m/s.
+- Launch and hop stand still for 2 s first, so the estimator calibrates its accelerometer bias at standstill.
+- Harness: the scenario script used to `pkill` every Gazebo on the machine, and servers it missed kept answering `/controller_manager` in the shared partition, so a later run's controllers "failed to configure", the car never drove and the mission lifted off at the start line on a diverged estimate. Runs are now isolated (own partition, ROS domain and process groups), the mission does not start without `/joint_states`, and such a run is reported as invalid.
+
+Gas is the binding limit: the tank leaves regulation at about 68 kg left, so about 182 kg is usable.
+Demo A, after the soft-landing work, uses about 195 kg, and the end of its landing burn runs at 83% feed; it still lands at 0.5 m/s, but with no margin.
+
 Phase ordering note: Phase 3 comes before fans on purpose, because it validates the thruster plugin under the simplest dynamics and calibrates mass against the 0.81 s figure before any ramp tuning depends on mass.
 
 ## 7. Parameters (roadster_params.yaml v0)

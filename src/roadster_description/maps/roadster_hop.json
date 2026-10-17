@@ -1,0 +1,119 @@
+{
+  "world": "roadster_hop",
+  "generator": "generate_stunt_world.py --kind hop --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 5.0 --run-in 60.0 --landing-width 12.0 --landing-x -45.0 -12.0 --runway-len 120.0 --hop-gap 0.5 --landing-len 45.0",
+  "spawn": {
+    "x": -60.0,
+    "y": 0.0,
+    "z": 0.05,
+    "roll": 0.0,
+    "pitch": 0.0,
+    "yaw": 0.0
+  },
+  "geometry": {
+    "kind": "hop",
+    "width": 5.0,
+    "obstacles": [
+      {
+        "name": "model_3",
+        "center": [
+          0.925,
+          0.0,
+          0.72
+        ],
+        "size": [
+          1.85,
+          4.72,
+          1.44
+        ]
+      },
+      {
+        "name": "model_y",
+        "center": [
+          3.31,
+          0.0,
+          0.81
+        ],
+        "size": [
+          1.92,
+          4.79,
+          1.62
+        ]
+      },
+      {
+        "name": "semi",
+        "center": [
+          6.07,
+          0.0,
+          2.05
+        ],
+        "size": [
+          2.6,
+          6.5,
+          4.1
+        ]
+      },
+      {
+        "name": "cybertruck",
+        "center": [
+          8.97,
+          0.0,
+          0.895
+        ],
+        "size": [
+          2.2,
+          5.68,
+          1.79
+        ]
+      },
+      {
+        "name": "cybercab",
+        "center": [
+          11.52,
+          0.0,
+          0.7
+        ],
+        "size": [
+          1.9,
+          3.6,
+          1.4
+        ]
+      }
+    ],
+    "row_x": [
+      0.0,
+      12.47
+    ],
+    "run_in": 60.0,
+    "landing_width": 12.0,
+    "landing_x": [
+      14.47,
+      59.47
+    ]
+  },
+  "surfaces": [
+    {
+      "type": "plane",
+      "name": "ground",
+      "point": [
+        0,
+        0,
+        0
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "box_min": [
+        -10000.0,
+        -10000.0,
+        -1.0
+      ],
+      "box_max": [
+        10000.0,
+        10000.0,
+        1.0
+      ]
+    }
+  ]
+}

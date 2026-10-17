@@ -106,6 +106,12 @@ TEST(Landing, FlareStartsEarlyAndCorrectsHarder)
   p.flare_kv = 10.0;
   p.flare_lead_time = 0.04;
   LandingBrake b{p};
+  // latches lead_time early: (g + a_b) lead_time below the profile speed
+  const double v0 = b.profileSpeed(5.0) - (9.81 + 14.7) * 0.04;
+  EXPECT_DOUBLE_EQ(b.upForce(5.0, -(v0 - 0.01), 1800, 1e6), 0.0);
+  EXPECT_FALSE(b.active());
+  EXPECT_GT(b.upForce(5.0, -(v0 + 0.01), 1800, 1e6), 0.0);
+  EXPECT_TRUE(b.active());
   // 1.2 m up at 6 m/s: 0.24 m of lead puts it in the flare already
   const double v = b.profileSpeed(1.2);
   EXPECT_NEAR(b.upForce(1.2, -v, 1800, 1e6), 1800 * (9.81 + 19.6), 1e-6);

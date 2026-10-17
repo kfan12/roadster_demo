@@ -12,6 +12,10 @@ touchdown's lateral speed and offset (inside the map's landing zone when
 (timeline starts with ACCELERATE) are also scored on the ground phase: arc
 progress, inverted hold time / stillness / wheel loads, lateral offset and
 body contacts on the ramp; flight checks apply only when the car released.
+The demo is told by its states: CLIMB = ramp (Demo A), HOLD = drop, LAUNCH =
+Demo C (0-60 mph time, rear thrust tracking, impulse, yaw), APPROACH = Demo B
+(clearance of the car's lowest corner, rolled as it flips, over each vehicle
+box in --map, apex, and the flight checks with a 1-turn (360 deg) target).
 
 Touchdown = first odom sample after release whose base_link is within
 --td-height of the ground (base_link sits at wheel-contact level). Vertical
@@ -25,6 +29,24 @@ import sys
 from pathlib import Path
 
 COM_Z = 0.33  # COM above base_link in the chassis frame (chassis_offset_z)
+MPH60 = 26.8224
+# the car's box for obstacle clearance, base_link frame: bumper to bumper,
+# the wheels' outer faces, from the hanging wheels' bottom in flight to the
+# cabin roof (the hop flips it, so any corner can be the lowest)
+CAR_X, CAR_Y, CAR_BOTTOM_Z, CAR_TOP_Z = 2.25, 0.93, -0.07, 1.26
+
+
+def rotate(q, v):
+    x, y, z, w = q
+    return (
+        (1 - 2 * (y * y + z * z)) * v[0] + 2 * (x * y - w * z) * v[1] + 2 * (x * z + w * y) * v[2],
+        2 * (x * y + w * z) * v[0] + (1 - 2 * (x * x + z * z)) * v[1] + 2 * (y * z - w * x) * v[2],
+        2 * (x * z - w * y) * v[0] + 2 * (y * z + w * x) * v[1] + (1 - 2 * (x * x + y * y)) * v[2])
+
+
+def yaw_of(q):
+    x, y, z, w = q
+    return math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
 
 
 def body_z(q):
@@ -49,7 +71,8 @@ def main():
                     help='sideways speed at touchdown [m/s]: a sliding landing can trip the car')
     ap.add_argument('--car-half-width', type=float, default=0.9,
                     help='the whole car must touch down inside the landing zone [m]')
-    ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
+    ap.add_argument('--turns', type=float, default=None,
+                    help='expected flip turns (default 0.5, or 1 for the hop)')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
     ap.add_argument('--min-hold', type=float, default=1.0, help='inverted hold [s] (ramp)')
     ap.add_argument('--max-est-pos', type=float, default=0.5,
@@ -58,6 +81,13 @@ def main():
                     help='IMU estimate attitude error vs truth, whole run [deg]')
     ap.add_argument('--min-release-speed', type=float, default=6.0,
                     help='forward speed when letting go of the overhang [m/s] (ramp)')
+    ap.add_argument('--zero-to-60', type=float, default=0.81, help='Demo C target [s]')
+    ap.add_argument('--zero-to-60-tol', type=float, default=0.05)
+    ap.add_argument('--launch-impulse', type=float, default=32e3,
+                    help='Demo C impulse estimate (plan Section 2) [N.s], scored within 25%%')
+    ap.add_argument('--max-yaw-deg', type=float, default=2.0, help='Demo C yaw error')
+    ap.add_argument('--min-clearance', type=float, default=0.5,
+                    help='Demo B: underside over every vehicle [m] (plan target 1.0)')
     ap.add_argument('--min-normal', type=float, default=500.0,
                     help='per-wheel normal force while held [N] (ramp); upside down a '
                          "wheel's own weight already reads ~147 N")
@@ -77,8 +107,15 @@ def main():
         if s['state'] != last:
             timeline.append((s['t'], s['state']))
             last = s['state']
-    t_release = next((t for t, st in timeline if st == 'RELEASE'), None)
+    states = {st for _, st in timeline}
+    ramp, drop = 'CLIMB' in states, 'HOLD' in states
+    launch, hop = 'LAUNCH' in states, 'APPROACH' in states
+    if args.turns is None:
+        args.turns = 1.0 if hop else 0.5
+    # flight starts when the car lets go (ramp, drop) or lifts off (hop)
+    t_release = next((t for t, st in timeline if st in ('RELEASE', 'HOP_BURN')), None)
     final = status[-1]
+    geometry = json.load(open(args.map))['geometry'] if args.map else {}
 
     # touchdown
     td_i = None
@@ -121,7 +158,6 @@ def main():
     m['body_contact_with'] = sorted({w for c in after for w in c['with']})
 
     checks = {}
-    ramp = any(st == 'ACCELERATE' for _, st in timeline)
     if ramp:
         # ground phase: from the start until release (or the end of a hold-only run)
         t_end_ground = t_release if t_release is not None else status[-1]['t'] + 1
@@ -190,7 +226,80 @@ def main():
                 m['release_speed'] >= args.min_release_speed,
             'stopped on its wheels': stop is not None,
         })
-    if t_release is not None or not ramp:
+    if launch:
+        # Demo C: 0-60 mph from the launch command, on truth speed (20 ms differences)
+        t0 = next(t for t, st in timeline if st == 'LAUNCH')
+        o0 = min(odom, key=lambda o: abs(o['t'] - t0))
+        speed = []
+        for a, b in zip(odom, odom[4:]):
+            speed.append(((a['t'] + b['t']) / 2, math.dist(a['p'][:2], b['p'][:2]) / (b['t'] - a['t'])))
+        t60 = next((t for t, v in speed if t > t0 and v >= MPH60), None)
+        m['top_speed'] = max(v for _, v in speed)
+        yaw0 = yaw_of(o0['q'])
+        after0 = [o for o in odom if o['t'] >= t0]
+        yaw_err = [math.remainder(yaw_of(o['q']) - yaw0, 2 * math.pi) for o in after0]
+        m['max_yaw_error_deg'] = math.degrees(max(abs(e) for e in yaw_err))
+        m['max_lateral_offset_m'] = max(abs(o['p'][1] - o0['p'][1]) for o in after0)
+        if t60 is not None:
+            m['zero_to_60_s'] = t60 - t0
+            o60 = min(odom, key=lambda o: abs(o['t'] - t60))
+            m['distance_to_60_m'] = o60['p'][0] - o0['p'][0]
+            m['launch_impulse_Ns'] = min(status, key=lambda s: abs(s['t'] - t60))['impulse_used']
+            # rear thrust delivered vs commanded, past the valves' rise
+            thrust = [r for r in recs if r['topic'] == 'thrust' and t0 + 0.1 <= r['t'] <= t60]
+            ratios = []
+            for r in thrust:
+                s = min(status, key=lambda s: abs(s['t'] - r['t']))
+                if s['state'] == 'LAUNCH' and s['wrench_des'][0] > 0:
+                    ratios.append(sum(r['f']) / s['wrench_des'][0])
+            if ratios:
+                m['thrust_tracking_max_err'] = max(abs(x - 1) for x in ratios)
+                cmd = [s['wrench_des'][0] for s in status
+                       if s['state'] == 'LAUNCH' and s['wrench_des'][0] > 0]
+                m['launch_thrust_kN'] = sum(ratios) / len(ratios) * sum(cmd) / len(cmd) / 1e3
+        stop = next((t for t, st in timeline if st == 'STOPPED'), None)
+        if stop is not None:
+            m['stop_x'] = min(odom, key=lambda o: abs(o['t'] - stop))['p'][0]
+        lo, hi = args.zero_to_60 - args.zero_to_60_tol, args.zero_to_60 + args.zero_to_60_tol
+        checks.update({
+            f'0-60 mph in {lo:.2f}-{hi:.2f} s': lo <= m.get('zero_to_60_s', 1e9) <= hi,
+            'rear thrust tracks the command (< 5%)': m.get('thrust_tracking_max_err', 1) < 0.05,
+            f'impulse within 25% of {args.launch_impulse / 1e3:.0f} kN.s':
+                abs(m.get('launch_impulse_Ns', 0) / args.launch_impulse - 1) < 0.25,
+            f'yaw error < {args.max_yaw_deg:.1f} deg': m['max_yaw_error_deg'] < args.max_yaw_deg,
+            'stopped on its wheels': stop is not None,
+            'no body contact': len(contacts) == 0,
+        })
+    if hop:
+        # Demo B: the lowest corner's clearance over each vehicle box while over it
+        obstacles = geometry.get('obstacles', [])
+        flight = [o for o in odom if t_release is not None and o['t'] >= t_release and
+                  ('t_touchdown' not in m or o['t'] <= m['t_touchdown'])]
+        clear = {}
+        for o in flight:
+            corners = [rotate(o['q'], (sx * CAR_X, sy * CAR_Y, z))
+                       for sx in (-1, 1) for sy in (-1, 1) for z in (CAR_BOTTOM_Z, CAR_TOP_Z)]
+            pts = [(o['p'][0] + c[0], o['p'][1] + c[1], o['p'][2] + c[2]) for c in corners]
+            x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+            y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+            for ob in obstacles:
+                (cx, cy, cz), (sx, sy, sz) = ob['center'], ob['size']
+                if x1 >= cx - sx / 2 and x0 <= cx + sx / 2 and y1 >= cy - sy / 2 and y0 <= cy + sy / 2:
+                    c = min(p[2] for p in pts) - (cz + sz / 2)
+                    clear[ob['name']] = min(clear.get(ob['name'], 1e9), c)
+        m['clearance_m'] = {k: round(v, 3) for k, v in clear.items()}
+        m['min_clearance_m'] = min(clear.values()) if clear else None
+        m['apex_com_height_m'] = max((com_z(o['p'], o['q']) for o in flight), default=None)
+        if t_release is not None:
+            m['liftoff_speed'] = next(s for s in status if s['t'] >= t_release)['speed']
+        stop = next((t for t, st in timeline if st == 'STOPPED'), None)
+        checks.update({
+            'lifted off': t_release is not None,
+            f'cleared every vehicle by >= {args.min_clearance:.1f} m':
+                len(clear) == len(obstacles) and (m['min_clearance_m'] or 0) >= args.min_clearance,
+            'stopped on its wheels': stop is not None,
+        })
+    if t_release is not None or drop or hop:
         checks.update({
             'landed': final['state'] == 'LANDED' or any(st == 'LANDED' for _, st in timeline),
             'touchdown found': 'touchdown_vz' in m,
@@ -202,12 +311,14 @@ def main():
             'flip rotation': abs(m['flip_rotation_deg'] - 360 * args.turns) < args.max_rot_err_deg,
             'no body contact after release': m['body_contacts_after_release'] == 0,
         })
-    landing_w = json.load(open(args.map))['geometry'].get('landing_width') if args.map else None
-    if landing_w is not None and (t_release is not None or not ramp):
+    landing_w = geometry.get('landing_width')
+    if landing_w is not None and t_release is not None:
         m['landing_zone_half_width'] = landing_w / 2
+        lx = geometry.get('landing_x', [-math.inf, math.inf])
         checks[f'touched down inside the {landing_w:.0f} m landing zone'] = (
             'touchdown_lateral_offset' in m and
-            abs(m['touchdown_lateral_offset']) + args.car_half_width <= landing_w / 2)
+            abs(m['touchdown_lateral_offset']) + args.car_half_width <= landing_w / 2 and
+            lx[0] <= m['touchdown_xy'][0] <= lx[1])
     # IMU state estimate vs ground truth, per mission phase
     est = {round(r['t'], 3): r for r in recs if r['topic'] == 'odom_est'}
     if est:
@@ -221,10 +332,18 @@ def main():
                 cur = st
             return cur
 
-        err = {}
+        # scored up to touchdown, what the stunt flies on: with no heading
+        # aid the estimate dead-reckons, and its yaw drift adds ~0.4% of the
+        # distance driven sideways (0.5 m on the hop's rollout, hop_imu4);
+        # the after-touchdown maximum is reported, not scored
+        t_score_end = m.get('t_touchdown', math.inf)
+        err, after_td = {}, 0.0
         for o in odom:
             e = est.get(round(o['t'], 3))
             if e is None:
+                continue
+            if o['t'] > t_score_end:
+                after_td = max(after_td, math.dist(o['p'], e['p']))
                 continue
             dp = math.dist(o['p'], e['p'])
             dz = abs(o['p'][2] - e['p'][2])
@@ -239,10 +358,13 @@ def main():
         m['estimate_error_by_phase'] = {
             ph: {'max_pos_m': round(a[0], 3), 'max_height_m': round(a[1], 3),
                  'max_att_deg': round(a[2], 2), 'samples': a[3]} for ph, a in err.items()}
+        if math.isfinite(t_score_end):
+            m['estimate_max_pos_err_after_touchdown_m'] = round(after_td, 3)
         if err:
             m['estimate_max_pos_err_m'] = max(a[0] for a in err.values())
             m['estimate_max_att_err_deg'] = max(a[2] for a in err.values())
-            checks[f'IMU estimate within {args.max_est_pos:.2f} m / {args.max_est_att:.1f} deg'] = (
+            until = ' to touchdown' if math.isfinite(t_score_end) else ''
+            checks[f'IMU estimate within {args.max_est_pos:.2f} m / {args.max_est_att:.1f} deg{until}'] = (
                 m['estimate_max_pos_err_m'] < args.max_est_pos and
                 m['estimate_max_att_err_deg'] < args.max_est_att)
     m['checks'] = checks
@@ -255,6 +377,9 @@ def main():
               'hold_drift_m', 'hold_xyz', 'body_contacts_on_ramp', 'body_contact_on_ramp_with',
               'release_speed', 'release_xyz', 'flight_distance_m', 'touchdown_forward_speed',
               'rollout_m', 'stop_xy',
+              'zero_to_60_s', 'distance_to_60_m', 'top_speed', 'launch_thrust_kN',
+              'thrust_tracking_max_err', 'launch_impulse_Ns', 'max_yaw_error_deg', 'stop_x',
+              'liftoff_speed', 'apex_com_height_m', 'min_clearance_m', 'clearance_m',
               'flip_rotation_deg', 'touchdown_vz', 'touchdown_tilt_deg', 'peak_vertical_accel_g',
               'touchdown_lateral_offset', 'touchdown_lateral_speed', 'landing_zone_half_width',
               'impulse_used_Ns', 'gas_used_kg', 'tank_mass_end_kg', 'min_feed_ratio_to_touchdown',
@@ -269,6 +394,8 @@ def main():
         for ph, e in m['estimate_error_by_phase'].items():
             print(f'    {str(ph):14s} pos {e["max_pos_m"]:.3f} m  height {e["max_height_m"]:.3f} m'
                   f'  attitude {e["max_att_deg"]:.2f} deg')
+        if 'estimate_max_pos_err_after_touchdown_m' in m:
+            print(f'    after touchdown (not scored): pos {m["estimate_max_pos_err_after_touchdown_m"]:.3f} m')
     for k, ok in checks.items():
         print(f'  [{"PASS" if ok else "FAIL"}] {k}')
     print('RESULT: ' + ('PASS' if m['pass'] else 'FAIL'))

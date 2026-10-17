@@ -11,6 +11,10 @@ Kinds:
   ramp     run-in road -> circular quarter-pipe arc of radius R continuing to
            `arc_deg` (180 = fully inverted) -> horizontal overhang back over
            the run-in, so a car flying off its end lands on flat road
+  launch   straight runway with a distance mark every 10 m (Demo C, 0-60 mph)
+  hop      runway with a row of parked vehicles across it, as boxes of their
+           real outer size (Model 3, Model Y, Semi, Cybertruck, Cybercab), and
+           a landing zone past them (Demo B, the obstacle hop)
 
 Ramp frame (x forward along the run-in, z up): the arc's centre is (0, R), so
 its bottom is tangent to the ground at x = 0 and an inverted car at the top
@@ -22,6 +26,8 @@ than the car (the Tesla ramp ends shortly past the top of the loop).
 Usage:
   python3 scripts/generate_stunt_world.py --kind ceiling --height 6
   python3 scripts/generate_stunt_world.py --kind ramp --radius 8
+  python3 scripts/generate_stunt_world.py --kind launch
+  python3 scripts/generate_stunt_world.py --kind hop
 Outputs:
   src/roadster_description/worlds/<name>.world.sdf
   src/roadster_description/maps/<name>.json
@@ -139,10 +145,10 @@ def road_markings(x0, x1, half_width):
 
 
 def landing_zone(x0, x1, half_width):
-    """Visual-only yellow outline of the landing zone (no collision), on the
-    road beyond the ramp foot. Wider than the road: the kick flip rolls on one
-    side's bottom thrusters, which drifts the car sideways before the side
-    nozzles brake it, so it may touch down off the road's centreline."""
+    """Visual-only yellow outline of the landing zone (no collision). Wider
+    than the road: on the ramp the kick flip rolls on one side's bottom
+    thrusters, which drifts the car sideways before the side nozzles brake it,
+    so it may touch down off the road's centreline."""
     length, cx = x1 - x0, (x0 + x1) / 2
     w = 0.15
     rects = [(cx, -half_width, length, w), (cx, half_width, length, w),
@@ -295,9 +301,88 @@ def build_ramp(a):
     return sdf, surfaces, spawn, geometry
 
 
+# Demo B row, in driving order (+x). Outer length x width x height [m]; parked
+# side by side across the runway, so a vehicle's WIDTH lies along the path.
+# The Semi (tractor) goes in the middle: the hop's arc only has to reach its
+# full height near the apex, where it is highest anyway. Cybercab: estimate.
+HOP_ROW = [
+    ('model_3', (4.72, 1.85, 1.44), '0.75 0.1 0.1'),
+    ('model_y', (4.79, 1.92, 1.62), '0.85 0.85 0.88'),
+    ('semi', (6.50, 2.60, 4.10), '0.2 0.25 0.35'),
+    ('cybertruck', (5.68, 2.20, 1.79), '0.62 0.64 0.66'),
+    ('cybercab', (3.60, 1.90, 1.40), '0.85 0.7 0.2'),
+]
+
+
+def ground_surface():
+    big = 1e4
+    return plane_surface('ground', [0, 0, 0], [0, 0, 1], [-big, -big, -1.0], [big, big, 1.0])
+
+
+def distance_marks(x0, x1, step, half_width):
+    """Visual-only white bars across the road every `step` m (no collision)."""
+    bars = ''
+    x, i = x0, 0
+    while x <= x1 + 1e-9:
+        bars += f"""      <visual name="mark_{i}">
+        <pose>{x:.3f} 0 0.005 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><box><size>0.15 {2 * half_width:.3f} 0.002</size></box></geometry>
+        <material><ambient>0.85 0.85 0.85 1</ambient><diffuse>0.85 0.85 0.85 1</diffuse></material>
+      </visual>
+"""
+        x += step
+        i += 1
+    return f"""    <model name="distance_marks">
+      <static>true</static>
+      <link name="link">
+{bars}      </link>
+    </model>
+"""
+
+
+def build_launch(a):
+    W, L = a.width, a.runway_len
+    sdf = ground(300, 60, L / 2, 2.0)
+    sdf += road_markings(-10.0, L, W / 2)
+    sdf += distance_marks(0.0, L, 10.0, W / 2)
+    # side-on, framing the start line to ~29 m (0-60 mph takes ~11 m)
+    sdf += trackside_camera(eye=(12.0, -28.0, 2.5), target=(12.0, 0.0, 0.8),
+                            hfov=1.1, width=640, height=400, rate=15)
+    spawn = {'x': 0.0, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
+    geometry = {'kind': 'launch', 'width': W, 'runway_x': [0.0, L]}
+    return sdf, [ground_surface()], spawn, geometry
+
+
+def build_hop(a):
+    W, gap = a.width, a.hop_gap
+    links, obstacles, x = '', [], 0.0
+    for name, (length, width, height), rgb in HOP_ROW:
+        cx = x + width / 2
+        links += box_link(name, cx, 0.0, height / 2, 0.0, width, length, height, 0.8, rgb)
+        obstacles.append({'name': name, 'center': [round(cx, 4), 0.0, height / 2],
+                          'size': [width, length, height]})
+        x += width + gap
+    row_x = [0.0, round(x - gap, 4)]
+    land_x = [row_x[1] + 2.0, row_x[1] + 2.0 + a.landing_len]
+    sdf = ground(300, 60, 0.0, 2.0)
+    sdf += road_markings(-a.run_in - 5.0, land_x[1] + 20.0, W / 2)
+    sdf += landing_zone(land_x[0], land_x[1], a.landing_width / 2)
+    sdf += f'    <model name="hop_row">\n      <static>true</static>\n{links}    </model>\n'
+    # side-on, framing the lift burn (~20 m before the row), the row and the
+    # landing (~30 m past its start): ~54 m wide at the road
+    mid_x = (row_x[0] + row_x[1]) / 2 - 1.0
+    sdf += trackside_camera(eye=(mid_x, -44.0, 3.5), target=(mid_x, 0.0, 3.0),
+                            hfov=1.1, width=640, height=400, rate=15)
+    spawn = {'x': -a.run_in, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
+    geometry = {'kind': 'hop', 'width': W, 'obstacles': obstacles, 'row_x': row_x,
+                'run_in': a.run_in, 'landing_width': a.landing_width, 'landing_x': land_x}
+    return sdf, [ground_surface()], spawn, geometry
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--kind', choices=('ceiling', 'ramp'), required=True)
+    ap.add_argument('--kind', choices=('ceiling', 'ramp', 'launch', 'hop'), required=True)
     ap.add_argument('--out', default=None, help='world name (default roadster_<kind>)')
     ap.add_argument('--width', type=float, default=5.0)
     ap.add_argument('--thickness', type=float, default=0.4)
@@ -312,15 +397,26 @@ def main():
     ap.add_argument('--overlap', type=float, default=0.02, help='segment length overlap [m]')
     ap.add_argument('--overhang-len', type=float, default=5.0,
                     help='just past the top: room for the car (4.5 m) to stop and hold')
-    ap.add_argument('--run-in', type=float, default=25.0, help='spawn distance before the ramp')
+    ap.add_argument('--run-in', type=float, default=None,
+                    help='spawn distance before the ramp (25) or the hop row (60)')
     ap.add_argument('--landing-width', type=float, default=12.0,
                     help='landing zone width, centred on the road [m]')
     ap.add_argument('--landing-x', type=float, nargs=2, default=[-45.0, -12.0],
-                    help='landing zone x range: touchdown ~-22 m, rollout to ~-35 m')
+                    help='ramp landing zone x range: touchdown ~-22 m, rollout to ~-35 m')
+    # launch
+    ap.add_argument('--runway-len', type=float, default=120.0, help='launch runway length [m]')
+    # hop
+    ap.add_argument('--hop-gap', type=float, default=0.5, help='gap between parked vehicles [m]')
+    ap.add_argument('--landing-len', type=float, default=45.0,
+                    help='hop landing zone length past the row [m]')
     a = ap.parse_args()
+    if a.run_in is None:
+        a.run_in = 60.0 if a.kind == 'hop' else 25.0
     name = a.out or f'roadster_{a.kind}'
 
-    sdf, surfaces, spawn, geometry = (build_ceiling if a.kind == 'ceiling' else build_ramp)(a)
+    builders = {'ceiling': build_ceiling, 'ramp': build_ramp, 'launch': build_launch,
+                'hop': build_hop}
+    sdf, surfaces, spawn, geometry = builders[a.kind](a)
     cli = ' '.join(f'--{k.replace("_", "-")} ' + (' '.join(map(str, v)) if isinstance(v, list) else str(v))
                    for k, v in vars(a).items() if v is not None)
     WORLD_DIR.mkdir(parents=True, exist_ok=True)

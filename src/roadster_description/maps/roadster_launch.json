@@ -1,0 +1,46 @@
+{
+  "world": "roadster_launch",
+  "generator": "generate_stunt_world.py --kind launch --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 5.0 --run-in 25.0 --landing-width 12.0 --landing-x -45.0 -12.0 --runway-len 120.0 --hop-gap 0.5 --landing-len 45.0",
+  "spawn": {
+    "x": 0.0,
+    "y": 0.0,
+    "z": 0.05,
+    "roll": 0.0,
+    "pitch": 0.0,
+    "yaw": 0.0
+  },
+  "geometry": {
+    "kind": "launch",
+    "width": 5.0,
+    "runway_x": [
+      0.0,
+      120.0
+    ]
+  },
+  "surfaces": [
+    {
+      "type": "plane",
+      "name": "ground",
+      "point": [
+        0,
+        0,
+        0
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "box_min": [
+        -10000.0,
+        -10000.0,
+        -1.0
+      ],
+      "box_max": [
+        10000.0,
+        10000.0,
+        1.0
+      ]
+    }
+  ]
+}

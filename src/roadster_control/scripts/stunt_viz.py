@@ -128,7 +128,8 @@ class StuntViz(Node):
     def world_markers(self, path):
         arr = MarkerArray()
         try:
-            surfaces = json.load(open(path))['surfaces']
+            world = json.load(open(path))
+            surfaces = world['surfaces']
         except (OSError, KeyError, ValueError) as e:
             self.get_logger().warn(f'no surfaces to draw from {path!r}: {e}')
             return arr
@@ -165,6 +166,18 @@ class StuntViz(Node):
                 m.color = rgba(0.6, 0.6, 0.68, 0.85)
             else:
                 continue
+            arr.markers.append(m)
+        # Demo B: the parked vehicles to hop over, as boxes of their outer size
+        for i, ob in enumerate(world.get('geometry', {}).get('obstacles', [])):
+            m = Marker()
+            m.header.frame_id = 'odom'
+            m.ns = 'obstacles'
+            m.id = i
+            m.type = Marker.CUBE
+            (m.pose.position.x, m.pose.position.y, m.pose.position.z) = ob['center']
+            m.pose.orientation.w = 1.0
+            (m.scale.x, m.scale.y, m.scale.z) = ob['size']
+            m.color = rgba(0.55, 0.6, 0.7, 0.8)
             arr.markers.append(m)
         return arr
 
