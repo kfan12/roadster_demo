@@ -96,6 +96,13 @@ scripts/run_stunt_scenario.sh roadster_ramp ramp                              # 
 MISSION_ARGS="state:=imu" scripts/run_stunt_scenario.sh roadster_ramp ramp    # mission on the IMU estimate
 ```
 
+The snapshots above come from such a run with the onboard camera on, saved by a capture tool started next to it:
+
+```bash
+MISSION_ARGS="state:=imu" scripts/run_stunt_scenario.sh roadster_ramp ramp snapshots -- with_camera:=true &
+python3 tools/avkit/capture_stunt_snapshots.py --out docs/snapshots
+```
+
 The stunt worlds are generated into `src/roadster_description/worlds/`, with their geometry in `src/roadster_description/maps/<world>.json` (the single source the fan, estimator and mission read).
 Rebuild after generating, so the new files are installed:
 
