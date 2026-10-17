@@ -527,7 +527,11 @@
             <fan>
                 <!-- 1.5 m g: inverted hold needs > 1 m g (plan section 3) -->
                 <f_max_mg>1.5</f_max_mg>
-                <tau_s>0.3</tau_s>
+                <tau_rise_s>0.3</tau_rise_s>
+                <!-- cut-off is immediate: at release the suction drops to zero
+                   at once instead of decaying with the rotor (with 0.3 s it
+                   still pulled the car up at 0.87 g just after letting go) -->
+                <tau_fall_s>0.0</tau_fall_s>
                 <h_seal_m>0.35</h_seal_m>
                 <h_max_m>1.0</h_max_m>
                 <!-- floor-pan underside center, chassis frame -->

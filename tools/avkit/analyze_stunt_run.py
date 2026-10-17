@@ -6,7 +6,9 @@
 Reads <session>/run.jsonl (record_stunt_run.py), writes <session>/metrics.json
 and prints a report. Metrics (plan section 9): flip rotation, touchdown
 vertical speed and attitude, peak landing deceleration, body (non-wheel)
-contacts after release, impulse and gas used, state timeline. Ramp runs
+contacts after release, impulse and gas used, state timeline, and the
+touchdown's lateral speed and offset (inside the map's landing zone when
+--map names a world JSON with a geometry.landing_width). Ramp runs
 (timeline starts with ACCELERATE) are also scored on the ground phase: arc
 progress, inverted hold time / stillness / wheel loads, lateral offset and
 body contacts on the ramp; flight checks apply only when the car released.
@@ -37,9 +39,16 @@ def com_z(p, q):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('session')
+    ap.add_argument('--map', default=None,
+                    help='maps/<world>.json: score the touchdown against its landing zone')
     ap.add_argument('--td-height', type=float, default=0.03)
-    ap.add_argument('--max-td-speed', type=float, default=3.0)
+    ap.add_argument('--max-td-speed', type=float, default=1.0,
+                    help='touchdown vertical speed [m/s]: the flare lands at ~0.4 (plan target was < 3)')
     ap.add_argument('--max-td-tilt-deg', type=float, default=10.0)
+    ap.add_argument('--max-td-lateral-speed', type=float, default=1.0,
+                    help='sideways speed at touchdown [m/s]: a sliding landing can trip the car')
+    ap.add_argument('--car-half-width', type=float, default=0.9,
+                    help='the whole car must touch down inside the landing zone [m]')
     ap.add_argument('--turns', type=float, default=0.5, help='expected flip turns')
     ap.add_argument('--max-rot-err-deg', type=float, default=15.0)
     ap.add_argument('--min-hold', type=float, default=1.0, help='inverted hold [s] (ramp)')
@@ -84,7 +93,8 @@ def main():
         vz = (com_z(o1['p'], o1['q']) - com_z(o0['p'], o0['q'])) / (o1['t'] - o0['t'])
         tilt = math.degrees(math.acos(max(-1.0, min(1.0, body_z(o1['q'])[2]))))
         m.update({'t_touchdown': o1['t'], 'touchdown_vz': vz, 'touchdown_tilt_deg': tilt,
-                  'touchdown_xy': o1['p'][:2]})
+                  'touchdown_xy': o1['p'][:2], 'touchdown_lateral_offset': o1['p'][1],
+                  'touchdown_lateral_speed': (o1['p'][1] - o0['p'][1]) / (o1['t'] - o0['t'])})
         # peak COM deceleration in the 0.5 s around touchdown (5-sample differences)
         win = [o for o in odom if o1['t'] - 0.5 <= o['t'] <= o1['t'] + 0.5]
         acc = []
@@ -101,6 +111,10 @@ def main():
     first = status[0]
     m['gas_used_kg'] = first['tank_mass'] - final['tank_mass']
     m['tank_mass_end_kg'] = final['tank_mass']
+    # below 1 the tank has dropped under the regulated nozzle pressure and every
+    # nozzle gives proportionally less thrust: the gas budget's real limit
+    to_td = [s for s in status if 't_touchdown' not in m or s['t'] <= m['t_touchdown']]
+    m['min_feed_ratio_to_touchdown'] = min(s['feed_ratio'] for s in to_td)
     m['max_height_m'] = max(s['height'] for s in status)
     after = [c for c in contacts if t_release is not None and c['t'] > t_release + 0.05]
     m['body_contacts_after_release'] = len(after)
@@ -183,9 +197,17 @@ def main():
             'touchdown speed': 'touchdown_vz' in m and abs(m['touchdown_vz']) < args.max_td_speed,
             'touchdown attitude': 'touchdown_tilt_deg' in m and
             m['touchdown_tilt_deg'] < args.max_td_tilt_deg,
+            'touchdown lateral speed': 'touchdown_lateral_speed' in m and
+            abs(m['touchdown_lateral_speed']) < args.max_td_lateral_speed,
             'flip rotation': abs(m['flip_rotation_deg'] - 360 * args.turns) < args.max_rot_err_deg,
             'no body contact after release': m['body_contacts_after_release'] == 0,
         })
+    landing_w = json.load(open(args.map))['geometry'].get('landing_width') if args.map else None
+    if landing_w is not None and (t_release is not None or not ramp):
+        m['landing_zone_half_width'] = landing_w / 2
+        checks[f'touched down inside the {landing_w:.0f} m landing zone'] = (
+            'touchdown_lateral_offset' in m and
+            abs(m['touchdown_lateral_offset']) + args.car_half_width <= landing_w / 2)
     # IMU state estimate vs ground truth, per mission phase
     est = {round(r['t'], 3): r for r in recs if r['topic'] == 'odom_est'}
     if est:
@@ -234,7 +256,9 @@ def main():
               'release_speed', 'release_xyz', 'flight_distance_m', 'touchdown_forward_speed',
               'rollout_m', 'stop_xy',
               'flip_rotation_deg', 'touchdown_vz', 'touchdown_tilt_deg', 'peak_vertical_accel_g',
-              'impulse_used_Ns', 'gas_used_kg', 'tank_mass_end_kg', 'max_height_m',
+              'touchdown_lateral_offset', 'touchdown_lateral_speed', 'landing_zone_half_width',
+              'impulse_used_Ns', 'gas_used_kg', 'tank_mass_end_kg', 'min_feed_ratio_to_touchdown',
+              'max_height_m',
               'body_contacts_after_release', 'body_contact_with', 't_touchdown', 'touchdown_xy'):
         if k not in m:
             continue

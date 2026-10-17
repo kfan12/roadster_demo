@@ -22,11 +22,13 @@ cleanup() {
   kill "${MPID:-}" "${SPID:-}" 2>/dev/null
   sleep 2
   pkill -f "ign gazebo" ; pkill -f parameter_bridge ; pkill -f robot_state_publisher
-  pkill -f stunt_mission_node
+  # the estimator too: one left from the previous run kept publishing
+  # /odom_est from where that car stopped, and the next drop run "landed" at release
+  pkill -f stunt_mission_node ; pkill -f state_estimator_node
 }
 trap cleanup EXIT
 
-pkill -f "ign gazebo"; sleep 1
+pkill -f "ign gazebo"; pkill -f stunt_mission_node; pkill -f state_estimator_node; sleep 1
 FAN0=0.0
 [ "$MODE" = "drop" ] && FAN0=1.0   # drop starts held to the ceiling
 ros2 launch roadster_description roadster_sim.launch.py world:="$WORLD" paused:=true \
@@ -38,7 +40,7 @@ ros2 launch roadster_control stunt_mission.launch.py mode:="$MODE" world:="$WORL
 MPID=$!
 sleep 3
 python3 "$WS/tools/avkit/record_stunt_run.py" --world "$WORLD" --out "$OUT" ${RECORD_ARGS:-}
-python3 "$WS/tools/avkit/analyze_stunt_run.py" "$OUT" ${ANALYZE_ARGS:-}
+python3 "$WS/tools/avkit/analyze_stunt_run.py" "$OUT"   --map "$WS/src/roadster_description/maps/$WORLD.json" ${ANALYZE_ARGS:-}
 RC=$?
 grep -E "\->" "$OUT/mission.log" | sed 's/.*\] //' | head -20
 exit $RC

@@ -17,6 +17,9 @@
 //   RELEASE        fan off, hold the start attitude while the car falls clear
 //   FLIP           track a minimum-jerk rotation of flip_turns turns about the
 //                  body flip_axis (0.5 turn: inverted -> upright, plan correction 1)
+// Throughout the flight the thrust demand also brakes the lateral (world y)
+// velocity: the kick flip rolls on one side's bottom pair, whose push drifts
+// the car sideways, and the side nozzles cancel it.
 //   DESCENT        hold the final attitude, free fall
 //   LAND_BRAKE     once descending faster than the constant-deceleration profile,
 //                  burn to touch down at touchdown_speed
@@ -101,8 +104,16 @@ public:
     lp.brake_accel = declare_parameter<double>("brake_accel", lp.brake_accel);
     lp.touchdown_speed = declare_parameter<double>("touchdown_speed", lp.touchdown_speed);
     lp.k_v = declare_parameter<double>("brake_kv", lp.k_v);
+    lp.flare_height = declare_parameter<double>("flare_height", lp.flare_height);
+    lp.flare_accel = declare_parameter<double>("flare_accel", lp.flare_accel);
+    lp.flare_kv = declare_parameter<double>("flare_kv", lp.flare_kv);
+    lp.flare_lead_time = declare_parameter<double>("flare_lead_time", lp.flare_lead_time);
+    lp.touchdown_height = declare_parameter<double>("touchdown_height", lp.touchdown_height);
+    lp.thrust_fall_time = declare_parameter<double>("thrust_fall_time", lp.thrust_fall_time);
+    lateral_kv_ = declare_parameter<double>("lateral_kv", 2.0);
     landing_ = std::make_unique<LandingBrake>(lp);
     landed_load_ = declare_parameter<double>("landed_load", 0.1);
+    landed_height_ = declare_parameter<double>("landed_height", -0.02);
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/odom_truth");
     use_odom_twist_ = declare_parameter<bool>("use_odom_twist", false);
     mission_timeout_ = declare_parameter<double>("mission_timeout", 40.0);
@@ -343,8 +354,17 @@ private:
     // (/odom_est: each measurement update shifts the pose a few mm, which a
     // pose difference turns into 0.45 m/s speed spikes and torque bursts that
     // crept the car 4 cm through the inverted hold), else by pose difference
-    const double v_fwd = use_odom_twist_ ? m.twist.twist.linear.x : (R.transpose() * v_world).x();
-    speed_ += 0.2 * (v_fwd - speed_);  // ~25 ms EMA at 200 Hz
+    const Vec3 v_body = use_odom_twist_ ?
+      Vec3(m.twist.twist.linear.x, m.twist.twist.linear.y, m.twist.twist.linear.z) :
+      Vec3(R.transpose() * v_world);
+    speed_ += 0.2 * (v_body.x() - speed_);  // ~25 ms EMA at 200 Hz
+    // lateral (world y) velocity of the COM, not base_link: 0.33 m below it,
+    // base_link swings sideways at up to ~1.3 m/s during the roll itself
+    const Vec3 r_com = com_chassis_ + Vec3(0, 0, chassis_z_);
+    const Vec3 w_body(m.twist.twist.angular.x, m.twist.twist.angular.y, m.twist.twist.angular.z);
+    const double vy_com = use_odom_twist_ ? (R * (v_body + w_body.cross(r_com))).y() :
+      (com.y() - prev_->com.y()) / dt;
+    vy_ += 0.2 * (vy_com - vy_);  // same EMA
     roll_progress_ += w.dot(flip_axis_) * dt;
     prev_ = Prev{t, com, p, q};
     const double h = com.z() - landed_com_height_;
@@ -450,7 +470,7 @@ private:
       // From standstill, still upside down on the fan: accelerate forward and
       // let go while the front axle is still under the overhang, so all four
       // wheels leave together and the car flies on with this speed. The short
-      // overhang leaves too little run for the tyres alone, so the two rear
+      // overhang leaves too little run for the tyres alone, so the four rear
       // nozzles supply the rest (Tesla's thrusters "launched it off the ramp");
       // the wheels track the speed trajectory, the thrust is feed-forward.
       fan = 1.0;
@@ -520,14 +540,17 @@ private:
       // airborne wheel reads negative), with a low estimated height as the
       // backup. Contact, not "carrying the car's weight": the brake burn still
       // holds ~2.5 m g at touchdown, so a 0.5 m g load threshold was missed,
-      // the car bounced and hovered on thrust (est_shadow3).
+      // the car bounced and hovered on thrust (est_shadow3). The backup height
+      // is below the standing height (suspension compressed): at 0.15 m it
+      // cut the burn 55 ms before the wheels touched, and the car dropped the
+      // last 0.14 m onto the road at 2.6 m/s (fan_cut_imu1).
       double load = 0.0;
       for (std::size_t i = 0; i < 4; ++i) {
         load += std::max(wheelNormal(i), 0.0);
       }
       const bool upright = R.col(2).z() > std::cos(0.35);
       if (upright && state_ == "LAND_BRAKE" &&
-        (load > landed_load_ * mass_ * kG || h < 0.15))
+        (load > landed_load_ * mass_ * kG || h < landed_height_))
       {
         enter("LANDED", t);
       } else if (*feed_ratio_ <= 0.0) {
@@ -573,9 +596,9 @@ private:
     a.u = Eigen::VectorXd::Zero(alloc_->size());
     a.achieved.setZero();
     if (flying() && state_ != "LANDED") {
-      // forces requested and weighted in WORLD axes (lift up, no horizontal
-      // push whatever the attitude), torques in body axes
-      w_des.head<3>() = Vec3(0, 0, f_up);
+      // forces requested and weighted in WORLD axes (lift up, brake the
+      // lateral drift, no forward push whatever the attitude), torques in body axes
+      w_des.head<3>() = Vec3(0, -mass_ * lateral_kv_ * vy_, f_up);
       w_des.tail<3>() = tau;
       a = alloc_->solve(w_des, weights, *feed_ratio_, lambda_, R);
       a.achieved.head<3>() = R * a.achieved.head<3>();  // report in the same axes
@@ -649,7 +672,8 @@ private:
   double flip_turns_, flip_delay_, flip_duration_;
   AttitudeGains gains_;
   std::unique_ptr<LandingBrake> landing_;
-  double landed_load_, mission_timeout_, start_delay_;
+  double landed_load_, landed_height_, mission_timeout_, start_delay_;
+  double lateral_kv_;           // [1/s] flight lateral velocity damping
   std::string odom_topic_;
   bool use_odom_twist_;
   std::optional<double> first_t_;
@@ -677,7 +701,7 @@ private:
   double impulse_ = 0.0;
   double last_thrust_t_ = -1.0;
   std::optional<Prev> prev_;
-  double speed_ = 0.0, speed_int_ = 0.0;
+  double speed_ = 0.0, speed_int_ = 0.0, vy_ = 0.0;
   std::array<Vec3, 4> wheel_force_{};
   std::array<double, 4> wheel_angle_{0, 0, 0, 0}, wheel_rate_{0, 0, 0, 0};
   double roll_progress_ = 0.0;

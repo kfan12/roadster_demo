@@ -14,21 +14,32 @@
 #   force_dir   unit direction of the force ON THE CAR (opposite the exhaust)
 #   f_max_mg    max thrust at the reference feed pressure, as a multiple of the
 #               model's total weight m*g, so the layout scales with mass
-#               (rear pair 2 x 2.25 = 4.5 m g ~ "over 80 kN" at 1,800 kg).
+#               (rear four 4 x 1.125 = 4.5 m g ~ "over 80 kN" at 1,800 kg).
 #
-# Down (+z) and roof (-z) corner nozzles: one side's down pair plus the other
-# side's roof pair is a PURE roll (or pitch) couple with zero net force. The
-# first layout had in-plane side nozzles instead; with only +z nozzles to roll
-# on, a kick flip pushed the car 4.5 m sideways (body z sweeps through the
-# horizontal mid-flip) and added 1.4 m/s of descent (drop test, 2026-10-16).
+# Thruster groups (four rear, four bottom, two side: the grouping as the project
+# owner described the car, 2026-10-17, not checked against a public source;
+# positions and sizes are ours):
+#   rear_main_*  four facing backward: the launch off the overhang. The prefix
+#                is how the mission finds them for the drive-off thrust assist.
+#   down_*       four bottom corners pushing up (body +z): lift, landing burn,
+#                and the kick flip's roll torque (one side's pair).
+#   side_*       one exhausting to each side, at the COM (x = 0, z = 0) so it
+#                gives a pure lateral force with no roll or yaw torque.
+# With no roof nozzles there is no force-free roll couple: rolling on one
+# side's bottom pair also pushes the car along body z, which sweeps through the
+# horizontal mid-flip and drifts it sideways (4.5 m in the 2026-10-16 drop test
+# with in-plane side nozzles and no lateral control). The side nozzles cancel
+# that drift: near the start and end of the flip, where the roll torque (and
+# so the bottom thrust) peaks, body y is close to horizontal; after the flip
+# they brake the remaining lateral speed before touchdown.
 nozzles:
-  rear_main_left:   {xyz: [-2.25,  0.25, 0.30], force_dir: [1, 0, 0],  f_max_mg: 2.25}
-  rear_main_right:  {xyz: [-2.25, -0.25, 0.30], force_dir: [1, 0, 0],  f_max_mg: 2.25}
+  rear_main_left_outer:  {xyz: [-2.25,  0.55, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
+  rear_main_left_inner:  {xyz: [-2.25,  0.20, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
+  rear_main_right_inner: {xyz: [-2.25, -0.20, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
+  rear_main_right_outer: {xyz: [-2.25, -0.55, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
   down_front_left:  {xyz: [ 1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
   down_front_right: {xyz: [ 1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
   down_rear_left:   {xyz: [-1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
   down_rear_right:  {xyz: [-1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
-  roof_front_left:  {xyz: [ 1.90,  0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
-  roof_front_right: {xyz: [ 1.90, -0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
-  roof_rear_left:   {xyz: [-1.90,  0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
-  roof_rear_right:  {xyz: [-1.90, -0.75, 0.70], force_dir: [0, 0, -1], f_max_mg: 0.45}
+  side_left:        {xyz: [ 0.00,  0.90, 0.00], force_dir: [0, -1, 0], f_max_mg: 0.50}
+  side_right:       {xyz: [ 0.00, -0.90, 0.00], force_dir: [0, 1, 0],  f_max_mg: 0.50}

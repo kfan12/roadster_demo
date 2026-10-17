@@ -221,7 +221,17 @@ Language policy holds: everything in the control loop is C++; Python is only wor
 
 ### 5.4 SuctionFanSystem
 
-- F = F_max x w^2 x g(h), with w the normalized fan speed (first-order lag 0.2-0.5 s from `/roadster/fan_cmd`), applied along the body -z axis at the body center.
+- F = F_max x w^2 x g(h), with w the normalized fan speed (first-order lag 0.2-0.5 s from `/roadster/fan_cmd` when spinning up), applied along the body -z axis at the body center.
+  Cut-off is immediate (`tau_fall_s` 0, 2026-10-17): with a 0.3 s spin-down the suction still pulled the car up at 0.87 g just after release, fading to zero only after 0.35 s, so the first part of the fall was not a 1 g fall.
+  With the immediate cut-off the measured fall matches gravity plus the recorded thrust from release on, the car flies 1 m less far (16.6 m instead of 17.6 m), and the landing burn needs 2 kg more gas (175 kg; IMU-flown ramp run, PASS).
+- Soft landing (2026-10-17): touchdown was 2.6 m/s with a 5.1 g peak, for two reasons.
+  The backup touchdown test (estimated height < 0.15 m) fired 55 ms before the wheels touched, cutting the burn so the car dropped the last 0.14 m; it is now below the standing height (`landed_height` -0.02 m).
+  And the 1.5 g profile only reached its 1.5 m/s target at the standing height, while the hanging wheels touch about 2 cm higher.
+  The landing profile now has a 2 g flare below 1 m with stiffer feedback (`flare_kv` 10: a constant-deceleration profile's slope grows as a / v_ref near the ground, so a 0.2 m/s entry error grew to 0.9 m/s with k_v 3), a 40 ms early start for the thrust rise, its end at `touchdown_height` 0.05 m, and its deceleration stopped early by the nozzles' 20 ms fall lag (otherwise the car stopped 1.5 cm up and hovered).
+  IMU-flown ramp run: touchdown 0.57 m/s, peak 2.0 g, 188 kg of gas (175 kg before); drop run 0.77 m/s, 157 kg.
+  A 2.5 g flare left too little lift (of ~4 m g) to correct with; a 0.5 m/s target landed at 0.42 m/s but cost 8 kg more and the tank left regulation (feed 0.80) before touchdown; a 2 g main stage saved only 3 kg.
+  Gas is now the binding limit: regulation ends at about 68 kg left, so about 182 kg is usable, and the end of the landing burn runs at 92% feed.
+  The analyzer's touchdown speed limit is now 1.0 m/s (was the plan's 3) and it reports the lowest feed ratio before touchdown.
 - g(h): ground-effect falloff, g = 1 for h <= h_seal, decaying to 0 by h_max (defaults 0.15 m, 0.6 m).
 - h is computed from the analytic surfaces in the world JSON: the plugin loads `maps/<world>.json` (path passed as an SDF parameter by the launch file, same single-owner rule) and computes the signed distance from the body underside to the nearest ramp/ground/ceiling patch.
 - Fault injection: `fan_fail_at_s` and `fan_ramp_down_s` parameters.
@@ -309,6 +319,12 @@ Findings that changed the design along the way:
 - `Link::AddWorldForce`'s position argument is an offset from the link COM, not a link-frame point (Section 5.3).
 - The first nozzle layout (four in-plane side nozzles) could only roll the car with +z thrust, which pushed it 4.5 m sideways mid-flip.
   Roof-corner nozzles (body -z) make force-free roll couples; drift is now 5.6 cm.
+- The layout was then changed to the grouping the project owner described for the car (2026-10-17, not checked against a public source): four rear, four bottom and two side nozzles, so the roof couples are gone again.
+  The flight thrust demand now also brakes the world-y velocity (`lateral_kv`), and the allocator's lateral weight lets the side nozzles cancel the bottom pair's sideways push.
+  The roll torque, and so the bottom thrust, peaks near the start and end of the minimum-jerk flip, where body y is close to horizontal, so the side nozzles have authority exactly where the push is.
+  The loop damps the COM's lateral velocity: base_link, 0.33 m below it, swings sideways at up to ~1.3 m/s during the roll itself, and damping that wasted side thrust mid-flip (0.61 m offset instead of 0.4 m).
+  IMU-flown ramp runs: touchdown 0.39-0.41 m off the centreline at 0.05-0.07 m/s sideways, 171-172 kg of gas (169 kg with the roof layout); with the lateral control off, 5.1 m and 4.2 m/s.
+  The world has a 12 m wide landing zone, and the analyzer scores the touchdown's lateral speed and offset against it.
 - Tangent-at-midpoint arc boxes left a 2.7 mm step onto the overhang that unloaded a wheel to 0.2 kN at 6 m/s; the arc is now an inscribed polygon.
 - A speed-vs-distance stop law demands twice the available deceleration at its crossover; the stop onto the hold point is a planned constant-deceleration trajectory instead.
 - Fortress ignores a contact sensor's `<topic>`, `Link::WorldPose` needs a `WorldPose` component, and WorldControl reset leaves the car moving.
@@ -333,8 +349,8 @@ Every entry carries `value`, `source` and `confidence` fields in the YAML; the t
 | COM | 0.15 m behind wheelbase center, 0.45 m above ground | Assumption, low and slightly rearward per PDF |
 | wheelbase, track, wheel radius | 2.6 m, 1.65 m, 0.34 m | Assumption |
 | tire mu / mu2 | 1.2 / 1.2 | PDF range 1.0-1.5 |
-| nozzles | 10: 2 rear main (+x thrust, behind the plate door), 4 down-facing at corners, 4 lateral/corner canted for roll/yaw | Layout is an assumption; count is reported |
-| rear main f_max | 2 x 40 kN at p_ref | "Over 80 kN" |
+| nozzles | 10: 4 rear main (+x thrust, behind the plate door), 4 bottom corners (+z), 2 side (one each way, at the COM) | Count is reported; grouping as the project owner described it (unsourced); positions and sizes are assumptions |
+| rear main f_max | 4 x 20 kN at p_ref | "Over 80 kN" |
 | corner f_max | 4 x 20 kN down, 4 x 8 kN canted | Assumption sized so 4 down nozzles exceed 3.5 g lift; check against "4-5x tire force" |
 | exhaust velocity v_e | 350 m/s (range 300-450) | PDF estimate |
 | valve tau_rise / tau_fall | 20 ms / 20 ms | PDF 10-30 ms |

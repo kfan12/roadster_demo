@@ -108,6 +108,22 @@ TEST(Fan, GroundEffectAndSpinUp)
   EXPECT_NEAR(g.speed(), 1.0 - std::exp(-1.0), 1e-3);
 }
 
+TEST(Fan, SpinDownUsesItsOwnLagAndZeroCutsAtOnce)
+{
+  FanParams p;
+  p.f_max_n = 100.0;
+  p.tau_fall_s = 0.0;
+  FanModel f{p, 1.0};
+  EXPECT_DOUBLE_EQ(f.step(0.0, 0.2, 1e-3), 0.0);  // cut-off: no suction left
+  EXPECT_DOUBLE_EQ(f.speed(), 0.0);
+  p.tau_fall_s = 0.1;
+  FanModel g{p, 1.0};
+  for (int i = 0; i < 100; ++i) {
+    g.step(0.0, 0.0, 1e-3);  // one spin-down time constant
+  }
+  EXPECT_NEAR(g.speed(), std::exp(-1.0), 1e-3);
+}
+
 TEST(Gap, GroundPlaneOnlyCountsWhenFacingIt)
 {
   SurfaceSet s;

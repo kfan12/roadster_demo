@@ -17,17 +17,18 @@ https://github.com/user-attachments/assets/68e27f08-d7c8-4282-83e2-6fadb10eb732
 1. **Run-in:** accelerate to 6 m/s; the suction fans spin up about 6 m before the ramp.
 2. **Climb:** round an 8 m radius loop at 6 m/s, pressed onto the track by the fans.
 3. **Stop and hold:** brake on the upper arc and stop just past the top, upside down on a 5 m overhang, and stand still for 1 s on fan suction alone (parking brake on the wheels).
-4. **Drive-off:** from standstill, still upside down, accelerate forward with the wheels plus the two rear thrusters and let go of the overhang at about 7 m/s.
+4. **Drive-off:** from standstill, still upside down, accelerate forward with the wheels plus the four rear thrusters and let go of the overhang at about 7 m/s.
 5. **Kick flip:** roll 180 degrees about the car's long axis in about 0.8 s while flying forward.
-6. **Landing burn:** fire the down-facing thrusters on a constant-deceleration profile to touch down at about 2-3 m/s, then roll out and stop.
+6. **Landing burn:** fire the bottom thrusters at 1.5 g, then flare harder (2 g) over the last metre to touch down gently at about 0.6 m/s, then roll out and stop.
 
 ## Hardware enablers (as modelled)
 
 - **Cold-gas thrusters:** 10 nozzles fed from a 600 L carbon-overwrapped tank at 400 bar (about 250 kg of air), regulated to 100 bar at the nozzles, with first-order valve lag (20 ms) and a minimum on-time.
-  Two rear main nozzles (2 x 2.25 m g, the launch), four down-facing corner nozzles (4 x 1.1 m g, lift and landing) and four roof-corner nozzles pushing down (4 x 0.45 m g).
-  A down pair on one side with the roof pair on the other makes a pure roll couple with no net force, which is what lets the car flip without being pushed sideways.
+  Four rear nozzles facing backward (4 x 1.125 m g, the launch), four bottom corner nozzles pushing up (4 x 1.1 m g, lift, landing and the flip's roll torque) and two side nozzles, one exhausting to each side (2 x 0.5 m g, at the centre of mass so they push sideways without any torque).
+  With no nozzle pushing toward the floor there is no force-free roll couple: the kick flip rolls on one side's bottom pair, whose push sweeps through the horizontal as the car turns and would carry it about 5 m sideways, landing with 4 m/s of sideways speed.
+  The side nozzles cancel that drift, during the flip and in the descent after it: the car touches down about 0.4 m off the centreline with under 0.1 m/s of sideways speed, inside a 12 m wide landing zone.
   The tank depletes with use, so gas is the binding budget: the demo uses about 170 of the 250 kg.
-- **Suction fans:** up to 1.5 m g of downforce along the body's floor normal, with spin-up lag and a ground-effect falloff with the gap to the track (computed from the track's analytic geometry), enough to hold the car upside down at standstill.
+- **Suction fans:** up to 1.5 m g of downforce along the body's floor normal, with spin-up lag, an immediate cut-off (at release the car is in a 1 g fall at once) and a ground-effect falloff with the gap to the track (computed from the track's analytic geometry), enough to hold the car upside down at standstill.
   This is a lumped force; the physical mechanism (a pressure drop under a skirted floor, set by the fan curve and the skirt leakage) is not modelled yet.
 - **Suspension:** a preloaded spring-damper per corner (250 kN/m, damping ratio 0.5, plus or minus 12 cm), sized for the 4-5 g load at the bottom of the loop.
   Without it the rigid car can rest on one diagonal, leaving only two driven wheels.
@@ -43,8 +44,10 @@ All stunt forces (tank, nozzles, fan, suspension springs) come from a single Gaz
   Progress is measured as distance along the whole track (run-in, arc, overhang), the stop onto the hold point is a planned constant-deceleration trajectory, and while standing the wheels are held by a parking brake.
   Steering is held straight: the track is straight in one vertical plane, so with no disturbance there is nothing to correct.
 - **Flight phase:** a quaternion attitude controller (PD on the rotation-vector error with reference rate and acceleration feed-forward and gyroscopic compensation) tracks a minimum-jerk 180 degree roll.
-  A thrust allocator solves a small QP with OSQP for the 10 valve openings (bounded to [0, 1], since a nozzle can only push), weighting forces in world axes (lift up, no sideways push whatever the attitude) and torques in body axes.
-- **Landing:** a constant-deceleration velocity profile (1.5 g down to a 1.5 m/s touchdown target) latches on once the car falls faster than it, with the deceleration feed-forward only while descending; touchdown is detected from wheel contact, not height.
+  A thrust allocator solves a small QP with OSQP for the 10 valve openings (bounded to [0, 1], since a nozzle can only push), weighting forces in world axes (lift up, braking any sideways velocity whatever the attitude) and torques in body axes.
+- **Landing:** a two-stage constant-deceleration velocity profile (1.5 g, then a 2 g flare below 1 m) latches on once the car falls faster than it, with the deceleration feed-forward only while descending.
+  The flare has stiffer feedback, starts 40 ms early to cover the nozzles' thrust rise, and ends early by their thrust fall, so the car arrives at about 0.6 m/s without hovering.
+  Touchdown is detected from wheel contact, with a height backup only below the standing height.
 - **State estimation** (`roadster_control/state_estimator_node`): an IMU strapdown integration in a 15-state error-state EKF (position, velocity, attitude, accelerometer and gyro biases).
   It is corrected only by what the car can sense itself: wheel speed (encoders plus gyro pitch rate) with no side-slip and no hop, each loaded wheel centre one radius from the known track surface, and zero-velocity, gravity and zero-rate updates when standing still.
   In flight it runs on the IMU alone.
@@ -113,7 +116,9 @@ Gazebo shows the same thrust and fan plumes as particle effects.
 
 ## Result
 
-IMU-flown run (`state:=imu`): stands upside down at the top for 1.0 s without moving, all four wheels loaded from run-in to drive-off, release at 7.2 m/s, 180.0 degree flip, touchdown at 2.8 m/s vertical with 0.17 degrees tilt and a peak near 5.6 g, then a rollout to a stop, with no body contact; the whole stunt takes 18 s of sim time.
+IMU-flown run (`state:=imu`): stands upside down at the top for 1.0 s without moving, all four wheels loaded from run-in to drive-off, release at 7.2 m/s, 180 degree flip, touchdown at 0.57 m/s vertical with 0.2 degrees tilt and a peak of 2.0 g, 0.43 m off the centreline at 0.1 m/s sideways, then a rollout to a stop, with no body contact; the whole stunt takes 18 s of sim time.
+It uses 188 kg of the 250 kg of air.
+The tank leaves regulation (below 100 bar at the nozzles, so every nozzle weakens) at about 68 kg, so the usable budget is about 182 kg: the end of the landing burn already runs at 92% feed pressure, and gas is the binding limit.
 The simulation is deterministic apart from sensor noise, so repeated runs show repeatability, not margin; robustness testing (noise, wind, parameter sweeps) is still to come.
 
 ## Packages

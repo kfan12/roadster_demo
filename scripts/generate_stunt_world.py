@@ -138,6 +138,32 @@ def road_markings(x0, x1, half_width):
 """
 
 
+def landing_zone(x0, x1, half_width):
+    """Visual-only yellow outline of the landing zone (no collision), on the
+    road beyond the ramp foot. Wider than the road: the kick flip rolls on one
+    side's bottom thrusters, which drifts the car sideways before the side
+    nozzles brake it, so it may touch down off the road's centreline."""
+    length, cx = x1 - x0, (x0 + x1) / 2
+    w = 0.15
+    rects = [(cx, -half_width, length, w), (cx, half_width, length, w),
+             (x0, 0.0, w, 2 * half_width), (x1, 0.0, w, 2 * half_width)]
+    lines = ''
+    for i, (x, y, sx, sy) in enumerate(rects):
+        lines += f"""      <visual name="edge_{i}">
+        <pose>{x:.3f} {y:.3f} 0.006 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><box><size>{sx:.3f} {sy:.3f} 0.002</size></box></geometry>
+        <material><ambient>0.9 0.75 0.1 1</ambient><diffuse>0.9 0.75 0.1 1</diffuse></material>
+      </visual>
+"""
+    return f"""    <model name="landing_zone">
+      <static>true</static>
+      <link name="link">
+{lines}      </link>
+    </model>
+"""
+
+
 def box_link(name, x, y, z, pitch, sx, sy, sz, mu, rgb):
     return f"""      <link name="{name}">
         <pose>{x:.4f} {y:.4f} {z:.4f} 0 {pitch:.6f} 0</pose>
@@ -243,6 +269,7 @@ def build_ramp(a):
     sdf = ground(300, 60, -60, 2.0)
     # run-in + landing road, painted to the ramp's width, ending at the ramp foot
     sdf += road_markings(-80.0, 0.0, W / 2)
+    sdf += landing_zone(a.landing_x[0], a.landing_x[1], a.landing_width / 2)
     # side-on camera framing run-in, loop and landing zone (x ~ -30 .. +R)
     mid_x = (R - 30.0) / 2
     sdf += trackside_camera(eye=(mid_x, -4.2 * R, R), target=(mid_x, 0.0, R * 0.8),
@@ -263,6 +290,7 @@ def build_ramp(a):
     geometry = {'kind': 'ramp', 'radius': R, 'arc_deg': a.arc_deg, 'width': W,
                 'thickness': t, 'overhang_len': L, 'run_in': a.run_in,
                 'arc_center_xz': [0.0, R], 'arc_theta': [th0, th1],
+                'landing_width': a.landing_width, 'landing_x': a.landing_x,
                 'drop_height': 2 * R if abs(a.arc_deg - 180.0) < 1e-6 else None}
     return sdf, surfaces, spawn, geometry
 
@@ -285,11 +313,16 @@ def main():
     ap.add_argument('--overhang-len', type=float, default=5.0,
                     help='just past the top: room for the car (4.5 m) to stop and hold')
     ap.add_argument('--run-in', type=float, default=25.0, help='spawn distance before the ramp')
+    ap.add_argument('--landing-width', type=float, default=12.0,
+                    help='landing zone width, centred on the road [m]')
+    ap.add_argument('--landing-x', type=float, nargs=2, default=[-45.0, -12.0],
+                    help='landing zone x range: touchdown ~-22 m, rollout to ~-35 m')
     a = ap.parse_args()
     name = a.out or f'roadster_{a.kind}'
 
     sdf, surfaces, spawn, geometry = (build_ceiling if a.kind == 'ceiling' else build_ramp)(a)
-    cli = ' '.join(f'--{k.replace("_", "-")} {v}' for k, v in vars(a).items() if v is not None)
+    cli = ' '.join(f'--{k.replace("_", "-")} ' + (' '.join(map(str, v)) if isinstance(v, list) else str(v))
+                   for k, v in vars(a).items() if v is not None)
     WORLD_DIR.mkdir(parents=True, exist_ok=True)
     MAP_DIR.mkdir(parents=True, exist_ok=True)
     (WORLD_DIR / f'{name}.world.sdf').write_text(HEADER.format(name=name, args=cli) + sdf + FOOTER)

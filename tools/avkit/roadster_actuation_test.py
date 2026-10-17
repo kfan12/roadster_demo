@@ -11,7 +11,7 @@ body-frame linear and angular acceleration from /odom_truth poses, and compares
 them with the rigid-body prediction a = F / m, alpha = I_com^-1 (r x F), where
 m, COM and I_com come from the expanded URDF itself.
 
-The rear-main pair is the decisive case: its line of action passes 0.30 m above
+The rear-main nozzles are the decisive case: their line of action passes 0.30 m above
 the COM but 0.63 m above the SDF link origin (chassis is lumped into base_link
 at ground level), so a force applied at the wrong point flips the pitch sign.
 
@@ -219,9 +219,9 @@ def main():
         return 1
 
     patterns = [(nm, {nm: args.u}) for nm in names]
-    patterns += [('rear_main pair', {'rear_main_left': args.u, 'rear_main_right': args.u}),
+    patterns += [('all four rear_main', {k: args.u for k in names if k.startswith('rear_main')}),
                  ('all four down', {k: args.u for k in names if k.startswith('down_')}),
-                 ('roll couple (down left)', {'down_front_left': args.u, 'down_rear_left': args.u})]
+                 ('roll (down left pair)', {'down_front_left': args.u, 'down_rear_left': args.u})]
 
     failures = 0
     fmt = lambda v: '[' + ' '.join(f'{x:+8.1f}' for x in v) + ']'  # noqa: E731

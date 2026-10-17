@@ -189,7 +189,8 @@ public:
     double fan_w0 = 0.0;
     if (auto f = sdfChild(sdf, "fan")) {
       fp.f_max_n = sdfGet<double>(f, "f_max_mg", 0.0) * weight;
-      fp.tau_s = sdfGet<double>(f, "tau_s", fp.tau_s);
+      fp.tau_rise_s = sdfGet<double>(f, "tau_rise_s", fp.tau_rise_s);
+      fp.tau_fall_s = sdfGet<double>(f, "tau_fall_s", fp.tau_fall_s);
       fp.h_seal_m = sdfGet<double>(f, "h_seal_m", fp.h_seal_m);
       fp.h_max_m = sdfGet<double>(f, "h_max_m", fp.h_max_m);
       fan_w0 = sdfGet<double>(f, "initial_speed", 0.0);

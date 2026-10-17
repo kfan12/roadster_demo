@@ -80,6 +80,75 @@ TEST(Landing, FreeFallThenLatchedBrake)
   EXPECT_DOUBLE_EQ(b.upForce(1.0, -30.0, 1800, 5000.0), 5000.0);  // clamped to capacity
 }
 
+TEST(Landing, FlareBrakesHarderNearTheGround)
+{
+  LandingParams p;
+  p.touchdown_speed = 0.5;
+  p.flare_height = 1.0;
+  p.flare_accel = 24.5;
+  LandingBrake b{p};
+  // continuous at h_f: the flare stage alone takes 0.5 m/s up to h_f
+  const double v_f = std::sqrt(0.25 + 2 * 24.5 * 1.0);
+  EXPECT_NEAR(b.profileSpeed(1.0), v_f, 1e-12);
+  EXPECT_NEAR(b.profileSpeed(5.0), std::sqrt(v_f * v_f + 2 * 14.7 * 4.0), 1e-12);
+  EXPECT_NEAR(b.profileSpeed(0.0), 0.5, 1e-12);
+  EXPECT_NEAR(b.profileSpeed(-0.1), 0.5, 1e-12);
+  // on the profile: feed-forward a_b above the flare, a_f below it
+  EXPECT_NEAR(b.upForce(5.0, -b.profileSpeed(5.0), 1800, 1e6), 1800 * (9.81 + 14.7), 1e-6);
+  EXPECT_NEAR(b.upForce(0.5, -b.profileSpeed(0.5), 1800, 1e6), 1800 * (9.81 + 24.5), 1e-6);
+}
+
+TEST(Landing, FlareStartsEarlyAndCorrectsHarder)
+{
+  LandingParams p;
+  p.flare_height = 1.0;
+  p.flare_accel = 19.6;
+  p.flare_kv = 10.0;
+  p.flare_lead_time = 0.04;
+  LandingBrake b{p};
+  // 1.2 m up at 6 m/s: 0.24 m of lead puts it in the flare already
+  const double v = b.profileSpeed(1.2);
+  EXPECT_NEAR(b.upForce(1.2, -v, 1800, 1e6), 1800 * (9.81 + 19.6), 1e-6);
+  // 0.5 m/s too fast in the flare: k_vf, not k_v, on the error
+  const double v2 = b.profileSpeed(0.5) + 0.5;
+  EXPECT_NEAR(b.upForce(0.5, -v2, 1800, 1e6), 1800 * (9.81 + 19.6 + 10.0 * 0.5), 1e-6);
+}
+
+TEST(Landing, ReachesTouchdownSpeedAtTouchdownHeightAndHoldsIt)
+{
+  LandingParams p;
+  p.touchdown_speed = 0.5;
+  p.touchdown_height = 0.05;
+  p.flare_height = 1.0;
+  p.flare_accel = 19.6;
+  p.flare_kv = 10.0;
+  LandingBrake b{p};
+  EXPECT_NEAR(b.profileSpeed(0.05), 0.5, 1e-12);
+  EXPECT_NEAR(b.profileSpeed(0.02), 0.5, 1e-12);
+  EXPECT_NEAR(b.profileSpeed(1.05), std::sqrt(0.25 + 2 * 19.6), 1e-12);
+  EXPECT_GT(b.upForce(2.0, -30.0, 1800, 1e6), 0.0);  // latch
+  // below h_td on the profile: just hold the weight, no deceleration
+  EXPECT_NEAR(b.upForce(0.03, -0.5, 1800, 1e6), 1800 * 9.81, 1e-6);
+}
+
+TEST(Landing, FlareEndsEarlyByTheThrustFallLag)
+{
+  LandingParams p;
+  p.touchdown_speed = 0.5;
+  p.flare_height = 1.0;
+  p.flare_accel = 19.6;
+  p.flare_kv = 10.0;
+  p.thrust_fall_time = 0.02;
+  LandingBrake b{p};
+  EXPECT_GT(b.upForce(2.0, -30.0, 1800, 1e6), 0.0);  // latch
+  // on the profile at 0.7 m/s: above v_td / 2 + a_f t_fall = 0.642, still braking
+  const double h1 = (0.7 * 0.7 - 0.25) / (2 * 19.6);
+  EXPECT_NEAR(b.upForce(h1, -0.7, 1800, 1e6), 1800 * (9.81 + 19.6), 1e-6);
+  // at 0.6 m/s: the decaying thrust will take off the rest, feed-forward ends
+  const double h2 = (0.6 * 0.6 - 0.25) / (2 * 19.6);
+  EXPECT_NEAR(b.upForce(h2, -0.6, 1800, 1e6), 1800 * 9.81, 1e-6);
+}
+
 namespace
 {
 std::vector<NozzleGeom> roadsterNozzles(double mg)
@@ -89,12 +158,12 @@ std::vector<NozzleGeom> roadsterNozzles(double mg)
   const N tab[] = {
     {"down_front_left", 1.9, 0.75, 0, 0, 0, 1, 1.1}, {"down_front_right", 1.9, -0.75, 0, 0, 0, 1, 1.1},
     {"down_rear_left", -1.9, 0.75, 0, 0, 0, 1, 1.1}, {"down_rear_right", -1.9, -0.75, 0, 0, 0, 1, 1.1},
-    {"rear_main_left", -2.25, 0.25, 0.3, 1, 0, 0, 2.25},
-    {"rear_main_right", -2.25, -0.25, 0.3, 1, 0, 0, 2.25},
-    {"roof_front_left", 1.9, 0.75, 0.7, 0, 0, -1, 0.45},
-    {"roof_front_right", 1.9, -0.75, 0.7, 0, 0, -1, 0.45},
-    {"roof_rear_left", -1.9, 0.75, 0.7, 0, 0, -1, 0.45},
-    {"roof_rear_right", -1.9, -0.75, 0.7, 0, 0, -1, 0.45}};
+    {"rear_main_left_inner", -2.25, 0.2, 0.3, 1, 0, 0, 1.125},
+    {"rear_main_left_outer", -2.25, 0.55, 0.3, 1, 0, 0, 1.125},
+    {"rear_main_right_inner", -2.25, -0.2, 0.3, 1, 0, 0, 1.125},
+    {"rear_main_right_outer", -2.25, -0.55, 0.3, 1, 0, 0, 1.125},
+    {"side_left", 0, 0.9, 0, 0, -1, 0, 0.5},
+    {"side_right", 0, -0.9, 0, 0, 1, 0, 0.5}};
   std::vector<NozzleGeom> v;
   for (const auto & t : tab) {
     v.push_back({t.n, {t.x, t.y, t.z}, {t.dx, t.dy, t.dz}, t.k * mg});
@@ -135,41 +204,64 @@ TEST(Allocator, SaturatesWithinBoundsAndScalesWithFeed)
   EXPECT_DOUBLE_EQ(none.u.norm(), 0.0);
 }
 
-TEST(Allocator, PureRollTorqueIsAForceFreeCouple)
+TEST(Allocator, RollsOnOneSidesBottomPair)
 {
+  // no roof nozzles: a +roll torque can only come from the LEFT bottom pair
+  // (+z at y > 0), and costs a body +z force of tau / 0.75 m
   const double mg = 1800 * 9.81;
   ThrustAllocator a(roadsterNozzles(mg), mg, mg);
   Vec6 w;
   w << 0, 0, 0, 5000, 0, 0;
   Vec6 wt;
-  wt << 0.01, 0.01, 0.01, 1, 1, 1;  // flight weights: torque first, then no net force
-  const auto r = a.solve(w, wt, 1.0, 1e-6);
-  EXPECT_NEAR(r.achieved(3), 5000, 25);
-  EXPECT_NEAR(r.achieved.segment<2>(4).norm(), 0, 25);
-  EXPECT_LT(r.achieved.head<3>().norm(), 100.0);  // < 0.6% m g: no parasitic lift
-  // +roll: LEFT down (+z at y > 0) against RIGHT roof (-z at y < 0)
+  wt << 0.01, 0.3, 0.01, 1, 1, 1;  // the node's flight weights
+  const auto r = a.solve(w, wt, 1.0, 1e-4);
+  // within 3%: the small Fz weight trades a little torque for less of the
+  // unavoidable lift (the flip's attitude feedback makes up the difference)
+  EXPECT_NEAR(r.achieved(3), 5000, 150);
+  EXPECT_NEAR(r.achieved.segment<2>(4).norm(), 0, 50);
   const double left_down = r.u(0) + r.u(2), right_down = r.u(1) + r.u(3);
-  const double left_roof = r.u(6) + r.u(8), right_roof = r.u(7) + r.u(9);
   EXPECT_GT(left_down, 10 * right_down - 1e-6);
-  EXPECT_GT(right_roof, 10 * left_roof - 1e-6);
+  EXPECT_NEAR(r.achieved(2), 5000 / 0.75, 0.04 * 5000 / 0.75);
+  EXPECT_LT(r.u.segment<4>(4).norm(), 1e-3);  // rear nozzles shut
 }
 
-TEST(Allocator, WorldFrameForcesUseTheRoofWhenInverted)
+TEST(Allocator, SideNozzleCancelsTheFlipsSidewaysPush)
 {
-  // car inverted (rolled 180 deg): world up is body -z, so a WORLD lift
-  // request must come from the roof nozzles, not the (now downward) down ones
+  // early in the kick flip (rolled 160 deg from upright): the roll torque's
+  // bottom-pair force has a world-y component, and with a lateral weight the
+  // side nozzle facing the other way pushes it back to (almost) zero
   const double mg = 1800 * 9.81;
   ThrustAllocator a(roadsterNozzles(mg), mg, mg);
-  const Eigen::Matrix3d R = Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()).toRotationMatrix();
+  const Eigen::Matrix3d R =
+    Eigen::AngleAxisd(160.0 * M_PI / 180.0, Eigen::Vector3d::UnitX()).toRotationMatrix();
   Vec6 w;
-  w << 0, 0, 0.5 * mg, 0, 0, 0;
+  w << 0, 0, 0, 10000, 0, 0;
   Vec6 wt;
-  wt << 1, 1, 1, 1, 1, 1;
-  // the node's lambda: down + roof in equal proportion is a force-free null space,
-  // and only the gas penalty makes the solver leave it shut
-  const auto r = a.solve(w, wt, 1.0, 1e-4, R);
-  const Eigen::Vector3d f_world = R * r.achieved.head<3>();
-  EXPECT_NEAR(f_world.z(), 0.5 * mg, 5e-3 * mg);
-  EXPECT_NEAR(r.u.head<4>().norm(), 0.0, 1e-3);   // down nozzles shut
-  EXPECT_GT(r.u.tail<4>().minCoeff(), 0.2);        // roof nozzles carry it (0.5 / 1.8 m g)
+  wt << 0.01, 0.3, 0.01, 1, 1, 1;
+  const auto with = a.solve(w, wt, 1.0, 1e-4, R);
+  wt(1) = 0.0;
+  const auto without = a.solve(w, wt, 1.0, 1e-4, R);
+  const double fy_with = (R * with.achieved.head<3>()).y();
+  const double fy_without = (R * without.achieved.head<3>()).y();
+  EXPECT_NEAR(with.achieved(3), 10000, 300);  // the lateral weight costs no more torque than Fz's
+  EXPECT_GT(std::abs(fy_without), 0.1 * mg);  // tau / 0.75 m x sin(20 deg) ~ 0.26 m g
+  EXPECT_LT(std::abs(fy_with), 0.02 * mg);
+  EXPECT_GT(with.u(8) + with.u(9), 0.2);      // a side nozzle carries it
+}
+
+TEST(Allocator, SideNozzlesBrakeLateralVelocityWhenUpright)
+{
+  // after the flip: a world -y demand (braking a +y drift) comes from the
+  // side_left nozzle (force -y) alone, with no torque
+  const double mg = 1800 * 9.81;
+  ThrustAllocator a(roadsterNozzles(mg), mg, mg);
+  Vec6 w;
+  w << 0, -0.3 * mg, 0, 0, 0, 0;
+  Vec6 wt;
+  wt << 0.05, 0.5, 1, 1, 1, 1;  // the node's brake weights
+  const auto r = a.solve(w, wt, 1.0, 1e-4);
+  EXPECT_NEAR(r.achieved(1), -0.3 * mg, 0.01 * mg);
+  EXPECT_LT(r.achieved.tail<3>().norm(), 10.0);
+  EXPECT_NEAR(r.u(8), 0.6, 0.02);  // 0.3 / 0.5 m g
+  EXPECT_LT(r.u(9), 1e-3);
 }

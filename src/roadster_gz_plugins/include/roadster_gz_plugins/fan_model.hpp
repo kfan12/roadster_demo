@@ -116,7 +116,8 @@ public:
 struct FanParams
 {
   double f_max_n = 0.0;
-  double tau_s = 0.3;
+  double tau_rise_s = 0.3;  // spin-up lag
+  double tau_fall_s = 0.3;  // spin-down lag; 0 = suction gone at once on cut-off
   double h_seal_m = 0.35;
   double h_max_m = 1.0;
 };
@@ -142,7 +143,8 @@ public:
   double step(double cmd, double h, double dt)
   {
     cmd = std::clamp(cmd, 0.0, 1.0);
-    w_ += (cmd - w_) * (p_.tau_s > 0 ? 1.0 - std::exp(-dt / p_.tau_s) : 1.0);
+    const double tau = cmd >= w_ ? p_.tau_rise_s : p_.tau_fall_s;
+    w_ += (cmd - w_) * (tau > 0 ? 1.0 - std::exp(-dt / tau) : 1.0);
     force_ = p_.f_max_n * w_ * w_ * groundEffect(h);
     return force_;
   }

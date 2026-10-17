@@ -20,10 +20,20 @@ stunt_mission_node:
     att_kp: [36.0, 36.0, 36.0]   # 6 rad/s natural frequency
     att_kd: [10.8, 10.8, 10.8]   # zeta 0.9
 
-    brake_accel: 14.7            # 1.5 g constant-deceleration profile
-    touchdown_speed: 1.5         # [m/s], plan target < 3
+    brake_accel: 14.7            # 1.5 g constant-deceleration profile ...
+    flare_height: 1.0            # ... down to this COM height above standing [m], then
+    flare_accel: 19.6            # a 2 g flare (3 m g of the ~4 m g lift: 1 m g left to correct with) ...
+    touchdown_speed: 1.0         # ... to this at touchdown_height [m/s]; the decaying thrust takes
+                                 # off ~0.4 more: lands at ~0.6 (0.5 here landed at 0.4 but used 8 kg
+                                 # more gas and left the tank out of regulation at touchdown)
+    touchdown_height: 0.05       # COM above standing [m]: the hanging wheels touch at ~0.02
+    thrust_fall_time: 0.02       # nozzle valve fall lag (xacro tau_fall_s): the flare ends this early
     brake_kv: 3.0
+    flare_kv: 10.0               # [1/s] stiffer in the flare, where errors grow fast
+    flare_lead_time: 0.04        # start the flare thrust this early: the nozzles take ~40 ms to rise
+    lateral_kv: 2.0              # [1/s] flight: world-y force demand = -m kv vy (brakes the flip's drift)
     landed_load: 0.1             # touchdown: wheel contact > this x m g while upright (F/T)
+    landed_height: -0.02         # backup: COM this far below standing height (suspension compressed) [m]
     odom_topic: /odom_truth      # state source: /odom_truth (Gazebo) or /odom_est (IMU EKF)
     use_odom_twist: false        # speed from the odometry twist (set for /odom_est)
     mission_timeout: 40.0        # a ramp run takes ~12 s before the hold
@@ -61,7 +71,8 @@ stunt_mission_node:
 
     alloc_lambda: 1.0e-4         # valve-opening penalty (saves gas)
     # [Fx(world) Fy(world) Fz(world) Tx Ty Tz(body)] priorities. Flight: torque first,
-    # then no net force (down + roof corner nozzles make force-free couples);
-    # brake: world lift + torque, little horizontal push.
-    alloc_weights_flight: [0.01, 0.01, 0.01, 1.0, 1.0, 1.0]
-    alloc_weights_brake: [0.05, 0.05, 1.0, 1.0, 1.0, 1.0]
+    # then the lateral demand (side nozzles cancel the bottom pair's sideways push),
+    # little else (no roof nozzles: rolling on one bottom pair cannot be force-free);
+    # brake: world lift + torque, then the lateral demand.
+    alloc_weights_flight: [0.01, 0.3, 0.01, 1.0, 1.0, 1.0]
+    alloc_weights_brake: [0.05, 0.5, 1.0, 1.0, 1.0, 1.0]
