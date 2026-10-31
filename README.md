@@ -10,7 +10,7 @@ The car model was derived from the sedan in [kfan12/vlm_av_ws](https://github.co
 
 Demo A, the inverted ramp:
 
-https://github.com/user-attachments/assets/4eaea480-e1dd-41d7-8e14-943df34c0ef5
+https://github.com/user-attachments/assets/11f53bbb-29e8-44ea-a001-b1aa871c4633
 
 | Drive-off, upside down (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
 | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/4eaea480-e1dd-41d7-8e14-943df34c0ef5
 
 Demo B, the obstacle hop:
 
-https://github.com/user-attachments/assets/a52a0780-4d06-4f04-809e-7f65552e71cb
+https://github.com/user-attachments/assets/abc200b9-8873-4e66-80f2-d09fd912f0bf
 
 | Lift burn (trackside camera) | Upside down mid-roll, over the row | Landing burn past the row | Mid-roll (onboard camera) |
 | --- | --- | --- | --- |
