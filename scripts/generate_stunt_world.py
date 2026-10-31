@@ -35,6 +35,7 @@ Outputs:
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 WS = Path(__file__).resolve().parents[1]
@@ -73,10 +74,13 @@ HEADER = """<?xml version="1.0" ?>
     <plugin filename="ignition-gazebo-particle-emitter2-system"
             name="ignition::gazebo::systems::ParticleEmitter2"/>
     <gravity>0 0 -9.81</gravity>
-    <!-- look from vlm_robot_public's worlds: procedural ogre2 sky (no texture
-         assets; rendered fine under WSL software GL there) with a sky-blue
-         clear colour as the fallback if a GL backend cannot draw it -->
-    <scene>
+"""
+
+# Test rigs (ceiling, drop): daylight. Look from vlm_robot_public's worlds:
+# procedural ogre2 sky (no texture assets; rendered fine under WSL software GL
+# there) with a sky-blue clear colour as the fallback if a GL backend cannot
+# draw it.
+DAY = """    <scene>
       <ambient>0.4 0.4 0.4 1</ambient>
       <background>0.53 0.81 0.92 1</background>
       <shadows>true</shadows>
@@ -91,6 +95,104 @@ HEADER = """<?xml version="1.0" ?>
       <direction>-0.4 0.2 -0.9</direction>
     </light>
 """
+
+# Demo worlds (ramp, hop, launch): the unveil was staged at night under
+# floodlights (Tesla's event photos, 2026-10-15). A dim bluish moon casts the
+# only shadows; the floodlights (floodlights()) do not, to keep the software-GL
+# trackside camera cheap. Ambient stays high enough to read the scene.
+NIGHT = """    <scene>
+      <ambient>0.22 0.22 0.26 1</ambient>
+      <background>0.004 0.005 0.012 1</background>
+      <shadows>true</shadows>
+      <grid>false</grid>
+    </scene>
+    <light type="directional" name="moon">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 50 0 0 0</pose>
+      <diffuse>0.32 0.34 0.42 1</diffuse>
+      <specular>0.1 0.1 0.12 1</specular>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+"""
+
+# The Gazebo window ignores the world's <scene> ambient/background: its 3D
+# view plugin (MinimalScene) sets its own (0.4 / 0.8 grey in the stock
+# gui.config), which washed the night out. A world's <gui> replaces the stock
+# config, so night worlds carry Fortress's stock plugin set
+# (/usr/share/ignition/ignition-gazebo6/gui/gui.config) with the 3D view's
+# lighting set to match <scene>, opening at the trackside camera's pose.
+_FLOAT = ('<ignition-gui><property key="resizable" type="bool">false</property>'
+          '<property key="width" type="double">5</property>'
+          '<property key="height" type="double">5</property>'
+          '<property key="state" type="string">floating</property>'
+          '<property key="showTitleBar" type="bool">false</property></ignition-gui>')
+
+
+def _tool(x, y, w, h, card):
+    return ('<ignition-gui><property key="resizable" type="bool">false</property>'
+            f'<property key="x" type="double">{x}</property>'
+            f'<property key="y" type="double">{y}</property>'
+            f'<property key="width" type="double">{w}</property>'
+            f'<property key="height" type="double">{h}</property>'
+            '<property key="state" type="string">floating</property>'
+            '<property key="showTitleBar" type="bool">false</property>'
+            f'<property key="cardBackground" type="string">{card}</property></ignition-gui>')
+
+
+def _overlay(title, w, h, side):
+    return (f'<ignition-gui><title>{title}</title>'
+            '<property type="bool" key="showTitleBar">false</property>'
+            '<property type="bool" key="resizable">false</property>'
+            f'<property type="double" key="height">{h}</property>'
+            f'<property type="double" key="width">{w}</property>'
+            '<property type="double" key="z">1</property>'
+            '<property type="string" key="state">floating</property>'
+            f'<anchors target="3D View"><line own="{side}" target="{side}"/>'
+            '<line own="bottom" target="bottom"/></anchors></ignition-gui>')
+
+
+_DOCKED = ('<ignition-gui><property type="bool" key="showTitleBar">false</property>'
+           '<property type="string" key="state">docked</property></ignition-gui>')
+
+
+def night_gui(camera_pose):
+    plugins = [
+        ('MinimalScene', '3D View',
+         '<ignition-gui><title>3D View</title>'
+         '<property type="bool" key="showTitleBar">false</property>'
+         '<property type="string" key="state">docked</property></ignition-gui>'
+         '<engine>ogre2</engine><scene>scene</scene>'
+         '<ambient_light>0.22 0.22 0.26</ambient_light>'
+         '<background_color>0.004 0.005 0.012</background_color>'
+         f'<camera_pose>{camera_pose}</camera_pose>'),
+        ('EntityContextMenuPlugin', 'Entity context menu', _FLOAT.replace(
+            '<property key="resizable" type="bool">false</property>', '')),
+        ('GzSceneManager', 'Scene Manager', _FLOAT),
+        ('InteractiveViewControl', 'Interactive view control', _FLOAT),
+        ('CameraTracking', 'Camera Tracking', _FLOAT),
+        ('MarkerManager', 'Marker manager', _FLOAT),
+        ('SelectEntities', 'Select Entities', _FLOAT),
+        ('Spawn', 'Spawn Entities', _FLOAT),
+        ('VisualizationCapabilities', 'Visualization Capabilities', _FLOAT),
+        ('WorldControl', 'World control', _overlay('World control', 121, 72, 'left')
+         + '<play_pause>true</play_pause><step>true</step>'
+         '<start_paused>true</start_paused><use_event>true</use_event>'),
+        ('WorldStats', 'World stats', _overlay('World stats', 290, 110, 'right')
+         + '<sim_time>true</sim_time><real_time>true</real_time>'
+         '<real_time_factor>true</real_time_factor><iterations>true</iterations>'),
+        ('Shapes', 'Shapes', _tool(0, 0, 250, 50, '#666666')),
+        ('Lights', 'Lights', _tool(250, 0, 150, 50, '#666666')),
+        ('TransformControl', 'Transform control', _tool(0, 50, 250, 50, '#777777')
+         + '<legacy>false</legacy>'),
+        ('Screenshot', 'Screenshot', _tool(250, 50, 50, 50, '#777777')),
+        ('CopyPaste', 'CopyPaste', _tool(300, 50, 100, 50, '#777777')),
+        ('ComponentInspector', 'Component inspector', _DOCKED),
+        ('EntityTree', 'Entity tree', _DOCKED),
+    ]
+    body = ''.join(f'      <plugin filename="{f}" name="{n}">{cfg}</plugin>\n'
+                   for f, n, cfg in plugins)
+    return f'    <gui fullscreen="0">\n{body}    </gui>\n'
+
 
 FOOTER = """  </world>
 </sdf>
@@ -170,7 +272,8 @@ def landing_zone(x0, x1, half_width):
 """
 
 
-def box_link(name, x, y, z, pitch, sx, sy, sz, mu, rgb):
+def box_link(name, x, y, z, pitch, sx, sy, sz, mu, rgb, extra=''):
+    """Static box with collision; `extra` adds visual-only elements in its frame."""
     return f"""      <link name="{name}">
         <pose>{x:.4f} {y:.4f} {z:.4f} 0 {pitch:.6f} 0</pose>
         <collision name="c">
@@ -181,8 +284,67 @@ def box_link(name, x, y, z, pitch, sx, sy, sz, mu, rgb):
           <geometry><box><size>{sx:.4f} {sy:.4f} {sz:.4f}</size></box></geometry>
           <material><ambient>{rgb} 1</ambient><diffuse>{rgb} 1</diffuse></material>
         </visual>
-      </link>
+{extra}      </link>
 """
+
+
+def visual_box(name, pose, size, rgb, emissive=None, shadows=True):
+    """Visual-only box (no collision: scenery the car can never touch, even if
+    it overlaps the flight path). pose = (x, y, z, roll, pitch, yaw)."""
+    em = f'<emissive>{emissive} 1</emissive>' if emissive else ''
+    return f"""        <visual name="{name}">
+          <pose>{' '.join(f'{v:.4f}' for v in pose)}</pose>
+          <cast_shadows>{'true' if shadows else 'false'}</cast_shadows>
+          <geometry><box><size>{size[0]:.4f} {size[1]:.4f} {size[2]:.4f}</size></box></geometry>
+          <material><ambient>{rgb} 1</ambient><diffuse>{rgb} 1</diffuse>{em}</material>
+        </visual>
+"""
+
+
+def visual_model(name, visuals):
+    return f"""    <model name="{name}">
+      <static>true</static>
+      <link name="link">
+{visuals}      </link>
+    </model>
+"""
+
+
+def beam(name, p0, p1, w, rgb, emissive=None):
+    """Visual box of square section w from point p0 to p1 (any direction)."""
+    d = [b - a for a, b in zip(p0, p1)]
+    length = math.sqrt(sum(c * c for c in d))
+    yaw = math.atan2(d[1], d[0])
+    pitch = -math.atan2(d[2], math.hypot(d[0], d[1]))
+    mid = [(a + b) / 2 for a, b in zip(p0, p1)]
+    return visual_box(name, (*mid, 0.0, pitch, yaw), (length, w, w), rgb, emissive)
+
+
+def floodlights(poles, target):
+    """Light towers like the event's: a lattice-grey mast, an emissive lamp bank
+    and a spot light aimed at `target`. poles: [(x, y, height)]. Spots cast no
+    shadows (cost under software GL); the moon does."""
+    sdf = ''
+    for i, (x, y, h) in enumerate(poles):
+        dx, dy, dz = target[0] - x, target[1] - y, target[2] - h
+        n = math.sqrt(dx * dx + dy * dy + dz * dz)
+        yaw = math.atan2(dy, dx)
+        vis = visual_box('mast', (0, 0, h / 2, 0, 0, 0), (0.35, 0.35, h), '0.2 0.2 0.22')
+        vis += visual_box('lamps', (0, 0, h + 0.6, 0, 0, yaw), (0.4, 2.4, 1.2),
+                          '1 1 1', emissive='1 0.97 0.9', shadows=False)
+        sdf += visual_model(f'floodlight_{i}', vis).replace('<link name="link">', f"""<pose>{x:.3f} {y:.3f} 0 0 0 0</pose>
+      <link name="link">""", 1)
+        sdf += f"""    <light type="spot" name="flood_{i}">
+      <cast_shadows>false</cast_shadows>
+      <pose>{x:.3f} {y:.3f} {h + 0.6:.3f} 0 0 0</pose>
+      <diffuse>1.0 0.96 0.88 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>{dx / n:.4f} {dy / n:.4f} {dz / n:.4f}</direction>
+      <attenuation><range>120</range><constant>0.3</constant><linear>0.01</linear><quadratic>0.0006</quadratic></attenuation>
+      <spot><inner_angle>0.45</inner_angle><outer_angle>0.9</outer_angle><falloff>1.0</falloff></spot>
+    </light>
+"""
+    return sdf
 
 
 def trackside_camera(eye, target, hfov, width, height, rate):
@@ -237,6 +399,86 @@ def build_ceiling(a):
     return sdf, surfaces, spawn, geometry
 
 
+# The event ramp: smooth light-grey concrete with red LED strips along both
+# riding-surface edges, held by a blue-lit steel truss (Tesla's photos).
+CONCRETE = '0.62 0.62 0.60'
+STEEL = '0.16 0.17 0.2'
+STEEL_GLOW = '0.02 0.07 0.30'
+
+
+def curtain(x0, x1, y, h, panel=2.0):
+    """Stage drape: narrow panels at alternating angles, so the folds catch
+    the floodlights and read as fabric, not a wall."""
+    vis, n = '', int(round((x1 - x0) / panel))
+    for i in range(n):
+        x = x0 + (i + 0.5) * panel
+        yaw = 0.35 if i % 2 else -0.35
+        vis += visual_box(f'pleat_{i}', (x, y, h / 2, 0, 0, yaw), (panel / math.cos(0.35), 0.05, h),
+                          '0.20 0.012 0.018', emissive='0.035 0.0 0.004', shadows=False)
+    return vis
+
+
+def led_edges(length, W, t):
+    """Red LED strips on both side faces of a ramp segment, at the riding
+    surface (the box's +z face, towards the arc centre), in the segment frame."""
+    out = ''
+    for s, side in ((1, 'l'), (-1, 'r')):
+        out += visual_box(f'led_{side}', (0, s * (W / 2 + 0.04), t / 2 - 0.07, 0, 0, 0),
+                          (length, 0.08, 0.14), '1 0.05 0.04', emissive='1 0.04 0.03',
+                          shadows=False)
+    return out
+
+
+def ramp_structure(R, W, t, L, arc_full):
+    """Visual-only truss: a tower behind the loop, ribs from it to the arc's
+    back face, and (for the 180 deg ramp) a top girder over the overhang. All
+    columns stand outside the car's lane or behind the loop, but none has
+    collision anyway."""
+    w = 0.16
+    xs = (R + t + 1.2, R + t + 2.6)  # tower columns, behind the loop
+    ys = (W / 2 - 0.4, -(W / 2 - 0.4))
+    top = 2 * R + t + 1.2
+    vis, k = '', 0
+
+    def add(p0, p1, glow=False):
+        nonlocal vis, k
+        vis += beam(f'm{k}', p0, p1, w, STEEL, STEEL_GLOW if glow else None)
+        k += 1
+
+    for x in xs:
+        for y in ys:
+            add((x, y, 0), (x, y, top), glow=True)
+    levels = [2.0 * i for i in range(1, int(top // 2) + 1)]
+    z0 = 0.0
+    for z in levels:
+        for y in ys:
+            add((xs[0], y, z), (xs[1], y, z))
+            add((xs[0], y, z0), (xs[1], y, z))  # side bracing
+        for x in xs:
+            add((x, ys[0], z), (x, ys[1], z))
+        # rib to the arc's back face at this height, on both sides
+        if z < 2 * R:
+            th = math.asin(max(-1.0, min(1.0, (z - R) / (R + t))))
+            xb = (R + t) * math.cos(th)
+            for y in ys:
+                add((xb, y, z), (xs[0], y, z))
+        z0 = z
+    if arc_full:
+        # girder over the overhang: top chords, verticals and diagonals
+        zt, zb = 2 * R + t + 1.2, 2 * R + t + 0.1
+        x_end = -L
+        for y in (W / 2 + 0.3, -(W / 2 + 0.3)):
+            add((xs[1], y, zt), (x_end, y, zt), glow=True)
+            add((R * 0.3, y, zb), (x_end, y, zb))
+            n = 6
+            for i in range(n + 1):
+                x = x_end + (R * 0.3 - x_end) * i / n
+                add((x, y, zb), (x, y, zt))
+                if i < n:
+                    add((x, y, zb), (x + (R * 0.3 - x_end) / n, y, zt))
+    return visual_model('ramp_structure', vis)
+
+
 def build_ramp(a):
     R, W, t = a.radius, a.width, a.thickness
     arc = math.radians(a.arc_deg)
@@ -258,9 +500,8 @@ def build_ramp(a):
         rc = R * math.cos(d / 2) + t / 2  # inner face on the chord
         x, z = rc * math.cos(th), R + rc * math.sin(th)
         pitch = math.atan2(-math.cos(th), -math.sin(th))  # box x along the arc tangent
-        shade = 0.45 + 0.15 * (i % 2)
         links += box_link(f'arc_{i:03d}', x, 0.0, z, pitch, seg_len, W, t, a.mu,
-                          f'{shade:.2f} {shade:.2f} {shade + 0.05:.2f}')
+                          CONCRETE, led_edges(seg_len, W, t))
     # overhang: continues from the arc's end; for arc = 180 deg that is a flat
     # ceiling at z = 2R running in -x
     top_x, top_z = R * math.cos(th1), R + R * math.sin(th1)
@@ -271,8 +512,14 @@ def build_ramp(a):
     ocz = top_z + tang[1] * L / 2 + outward[1] * t / 2
     pitch_o = math.atan2(-math.cos(th1), -math.sin(th1))
     links += box_link('overhang', ocx, 0.0, ocz, pitch_o, L + a.overlap, W, t, a.mu,
-                      '0.55 0.45 0.45')
+                      CONCRETE, led_edges(L + a.overlap, W, t))
     sdf = ground(300, 60, -60, 2.0)
+    sdf += ramp_structure(R, W, t, L, arc_full=abs(a.arc_deg - 180.0) < 1e-6)
+    # pleated red drape on the far side from the trackside camera, and light
+    # towers (the camera-side one stands behind the camera)
+    sdf += visual_model('backdrop', curtain(x0=-50.0, x1=20.0, y=W / 2 + 9.0, h=12.0))
+    sdf += floodlights([(-32.0, 9.0, 12.0), (-8.0, 9.5, 14.0), (16.0, 7.0, 14.0),
+                        (-14.0, -40.0, 12.0)], target=(-6.0, 0.0, 6.0))
     # run-in + landing road, painted to the ramp's width, ending at the ramp foot
     sdf += road_markings(-80.0, 0.0, W / 2)
     sdf += landing_zone(a.landing_x[0], a.landing_x[1], a.landing_width / 2)
@@ -349,6 +596,8 @@ def build_launch(a):
     # side-on, framing the start line to ~29 m (0-60 mph takes ~11 m)
     sdf += trackside_camera(eye=(12.0, -28.0, 2.5), target=(12.0, 0.0, 0.8),
                             hfov=1.1, width=640, height=400, rate=15)
+    sdf += floodlights([(-5.0, 9.0, 12.0), (30.0, 9.0, 12.0), (12.0, -36.0, 12.0)],
+                       target=(14.0, 0.0, 1.0))
     spawn = {'x': 0.0, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
     geometry = {'kind': 'launch', 'width': W, 'runway_x': [0.0, L]}
     return sdf, [ground_surface()], spawn, geometry
@@ -374,6 +623,8 @@ def build_hop(a):
     mid_x = (row_x[0] + row_x[1]) / 2 - 1.0
     sdf += trackside_camera(eye=(mid_x, -44.0, 3.5), target=(mid_x, 0.0, 3.0),
                             hfov=1.1, width=640, height=400, rate=15)
+    sdf += floodlights([(-15.0, 10.0, 12.0), (mid_x, 10.0, 14.0), (30.0, 10.0, 12.0),
+                        (mid_x, -50.0, 12.0)], target=(mid_x, 0.0, 2.0))
     spawn = {'x': -a.run_in, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
     geometry = {'kind': 'hop', 'width': W, 'obstacles': obstacles, 'row_x': row_x,
                 'run_in': a.run_in, 'landing_width': a.landing_width, 'landing_x': land_x}
@@ -421,7 +672,12 @@ def main():
                    for k, v in vars(a).items() if v is not None)
     WORLD_DIR.mkdir(parents=True, exist_ok=True)
     MAP_DIR.mkdir(parents=True, exist_ok=True)
-    (WORLD_DIR / f'{name}.world.sdf').write_text(HEADER.format(name=name, args=cli) + sdf + FOOTER)
+    look = DAY  # test rigs
+    if a.kind != 'ceiling':  # the demo scenes
+        cam = re.search(r'<model name="trackside_camera">\s*<static>true</static>\s*'
+                        r'<pose>([^<]+)</pose>', sdf)
+        look = NIGHT + night_gui(cam.group(1) if cam else '-6 0 6 0 0.5 0')
+    (WORLD_DIR / f'{name}.world.sdf').write_text(HEADER.format(name=name, args=cli) + look + sdf + FOOTER)
     (MAP_DIR / f'{name}.json').write_text(json.dumps(
         {'world': name, 'generator': f'generate_stunt_world.py {cli}', 'spawn': spawn,
          'geometry': geometry, 'surfaces': surfaces}, indent=2) + '\n')

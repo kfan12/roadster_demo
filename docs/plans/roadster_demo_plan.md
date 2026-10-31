@@ -171,6 +171,7 @@ src/roadster_description/worlds/roadster_hop.world.sdf / maps/roadster_hop.json 
 src/roadster_description/worlds/roadster_{ceiling,drop16,ramp}.world.sdf  BUILT, generated, not hand-edited
 src/roadster_description/maps/roadster_{ceiling,drop16,ramp}.json  BUILT, generated alongside each world (single geometry owner)
 scripts/generate_stunt_world.py           BUILT: ceiling and ramp kinds (hop row: Phase 6)
+scripts/generate_roadster_mesh.py         BUILT: the car's body and wheel visual meshes (roadster_description/meshes/)
 scripts/run_stunt_scenario.sh             BUILT: paused sim + mission + record + analyze, one command
 tools/avkit/roadster_sizing.py            (Phase 0) the Section 2 arithmetic as a script
 tools/avkit/record_stunt_run.py, analyze_stunt_run.py   BUILT; stunt_monte_carlo.py (Phase 7)
@@ -333,7 +334,7 @@ Known gaps, not blocking Demo A:
 - Peak deceleration at touchdown is about 8.3 g: the car has rigid wheels and no suspension. A suspension model belongs to Phase 7.
 - Touchdown speed is 2.2 m/s against the 1.5 m/s profile target; the brake feedback (`brake_kv`) could be raised.
 - State is ground truth; the EKF path, sensor noise and Monte Carlo robustness are Phase 7.
-- No rear nozzle door, no plume visuals and no video calibration yet (Phase 8); ramp radius and fan force are assumptions until then.
+- No rear nozzle door and no video calibration yet (Phase 8); ramp radius and fan force are assumptions until then. (Plume and fan-exhaust particles have since been added: `with_effects` in the URDF.)
 - The zero-g test failed once in 13 runs, unexplained and not reproduced since; it now refuses to run with another thruster publisher alive.
 
 ### Demo C status (2026-10-17): done in simulation (Phase 3)
@@ -377,6 +378,25 @@ Findings:
 
 Gas is the binding limit: the tank leaves regulation at about 68 kg left, so about 182 kg is usable.
 Demo A, after the soft-landing work, uses about 195 kg, and the end of its landing burn runs at 83% feed; it still lands at 0.5 m/s, but with no margin.
+
+### Visuals (2026-11-01): the car and the event scene, from Tesla's unveil photos
+
+Visual only: collision, inertia, frames and the maps are unchanged, and the URDF's SDF differs from before only in its visuals.
+- **Car:** `scripts/generate_roadster_mesh.py` writes `roadster_body.dae` and `roadster_wheel.dae` into `roadster_description/meshes/`.
+  The body is a faceted low-poly loft of the unveiled car: a white wedge, a black lower body and sills, bronze glass from the cowl to a fastback between white buttresses, white front and red rear full-width light bars, and white aero wheel discs.
+  No dimensions are published, so the side profile was measured off the side-on press photo, scaled by its wheelbase to this model's 2.7 m.
+  The arches clear the wheels at full suspension travel, and brass rings mark the `rear_main_*` and `down_*` nozzle exits read from `nozzles.yaml`.
+  `--preview DIR` renders orthographic views with Pillow for shaping without Gazebo.
+- **Scene** (ramp, hop and launch worlds; the ceiling and drop rigs stay in daylight): the event ran at night under floodlights.
+  The ramp is uniform light concrete with red LED strips on both riding-surface edges, held by a blue-lit truss behind the loop with a girder over the overhang.
+  A pleated red drape stands on the far side from the trackside camera, with light towers whose spot lights cast no shadows; the moon casts the only shadows.
+  The night worlds carry their own `<gui>`, because the Gazebo window's 3D view otherwise applies the stock 0.4 ambient and 0.8 grey background over the world's `<scene>`.
+- **RViz:** the ramp markers are concrete with red LED edges and now carry per-vertex colours; with only `color` set, RViz 2 drew the triangle lists black.
+- **Onboard camera:** moved into the nose, just above the light bar (x 2.16, z 0.48 m), where nothing of the car is in view; the sedan's mount floated 0.9 m above this car's nose, and a roof mount showed half a frame of hood.
+
+Cost: the trackside camera renders the richer scene, and Demo A's real-time factor went from 0.75-0.77 to 0.70-0.71 (two runs each), most of it from the four spot lights (0.74 without them).
+Scored IMU-flown runs still PASS on ramp, hop and launch; nothing in the loop depends on wall time.
+Not done: the hop row is still boxes of the vehicles' outer size.
 
 Phase ordering note: Phase 3 comes before fans on purpose, because it validates the thruster plugin under the simplest dynamics and calibrates mass against the 0.81 s figure before any ramp tuning depends on mass.
 

@@ -30,23 +30,39 @@
     <plugin filename="ignition-gazebo-particle-emitter2-system"
             name="ignition::gazebo::systems::ParticleEmitter2"/>
     <gravity>0 0 -9.81</gravity>
-    <!-- look from vlm_robot_public's worlds: procedural ogre2 sky (no texture
-         assets; rendered fine under WSL software GL there) with a sky-blue
-         clear colour as the fallback if a GL backend cannot draw it -->
     <scene>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.53 0.81 0.92 1</background>
+      <ambient>0.22 0.22 0.26 1</ambient>
+      <background>0.004 0.005 0.012 1</background>
       <shadows>true</shadows>
       <grid>false</grid>
-      <sky></sky>
     </scene>
-    <light type="directional" name="sun">
+    <light type="directional" name="moon">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 50 0 0 0</pose>
-      <diffuse>0.9 0.9 0.9 1</diffuse>
-      <specular>0.3 0.3 0.3 1</specular>
+      <diffuse>0.32 0.34 0.42 1</diffuse>
+      <specular>0.1 0.1 0.12 1</specular>
       <direction>-0.4 0.2 -0.9</direction>
     </light>
+    <gui fullscreen="0">
+      <plugin filename="MinimalScene" name="3D View"><ignition-gui><title>3D View</title><property type="bool" key="showTitleBar">false</property><property type="string" key="state">docked</property></ignition-gui><engine>ogre2</engine><scene>scene</scene><ambient_light>0.22 0.22 0.26</ambient_light><background_color>0.004 0.005 0.012</background_color><camera_pose>5.235 -44.000 3.500 0 0.0114 1.5708</camera_pose></plugin>
+      <plugin filename="EntityContextMenuPlugin" name="Entity context menu"><ignition-gui><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="GzSceneManager" name="Scene Manager"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="InteractiveViewControl" name="Interactive view control"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="CameraTracking" name="Camera Tracking"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="MarkerManager" name="Marker manager"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="SelectEntities" name="Select Entities"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="Spawn" name="Spawn Entities"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="VisualizationCapabilities" name="Visualization Capabilities"><ignition-gui><property key="resizable" type="bool">false</property><property key="width" type="double">5</property><property key="height" type="double">5</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property></ignition-gui></plugin>
+      <plugin filename="WorldControl" name="World control"><ignition-gui><title>World control</title><property type="bool" key="showTitleBar">false</property><property type="bool" key="resizable">false</property><property type="double" key="height">72</property><property type="double" key="width">121</property><property type="double" key="z">1</property><property type="string" key="state">floating</property><anchors target="3D View"><line own="left" target="left"/><line own="bottom" target="bottom"/></anchors></ignition-gui><play_pause>true</play_pause><step>true</step><start_paused>true</start_paused><use_event>true</use_event></plugin>
+      <plugin filename="WorldStats" name="World stats"><ignition-gui><title>World stats</title><property type="bool" key="showTitleBar">false</property><property type="bool" key="resizable">false</property><property type="double" key="height">110</property><property type="double" key="width">290</property><property type="double" key="z">1</property><property type="string" key="state">floating</property><anchors target="3D View"><line own="right" target="right"/><line own="bottom" target="bottom"/></anchors></ignition-gui><sim_time>true</sim_time><real_time>true</real_time><real_time_factor>true</real_time_factor><iterations>true</iterations></plugin>
+      <plugin filename="Shapes" name="Shapes"><ignition-gui><property key="resizable" type="bool">false</property><property key="x" type="double">0</property><property key="y" type="double">0</property><property key="width" type="double">250</property><property key="height" type="double">50</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property><property key="cardBackground" type="string">#666666</property></ignition-gui></plugin>
+      <plugin filename="Lights" name="Lights"><ignition-gui><property key="resizable" type="bool">false</property><property key="x" type="double">250</property><property key="y" type="double">0</property><property key="width" type="double">150</property><property key="height" type="double">50</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property><property key="cardBackground" type="string">#666666</property></ignition-gui></plugin>
+      <plugin filename="TransformControl" name="Transform control"><ignition-gui><property key="resizable" type="bool">false</property><property key="x" type="double">0</property><property key="y" type="double">50</property><property key="width" type="double">250</property><property key="height" type="double">50</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property><property key="cardBackground" type="string">#777777</property></ignition-gui><legacy>false</legacy></plugin>
+      <plugin filename="Screenshot" name="Screenshot"><ignition-gui><property key="resizable" type="bool">false</property><property key="x" type="double">250</property><property key="y" type="double">50</property><property key="width" type="double">50</property><property key="height" type="double">50</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property><property key="cardBackground" type="string">#777777</property></ignition-gui></plugin>
+      <plugin filename="CopyPaste" name="CopyPaste"><ignition-gui><property key="resizable" type="bool">false</property><property key="x" type="double">300</property><property key="y" type="double">50</property><property key="width" type="double">100</property><property key="height" type="double">50</property><property key="state" type="string">floating</property><property key="showTitleBar" type="bool">false</property><property key="cardBackground" type="string">#777777</property></ignition-gui></plugin>
+      <plugin filename="ComponentInspector" name="Component inspector"><ignition-gui><property type="bool" key="showTitleBar">false</property><property type="string" key="state">docked</property></ignition-gui></plugin>
+      <plugin filename="EntityTree" name="Entity tree"><ignition-gui><property type="bool" key="showTitleBar">false</property><property type="string" key="state">docked</property></ignition-gui></plugin>
+    </gui>
     <model name="ground">
       <static>true</static>
       <pose>0.000 0 0 0 0 0</pose>
@@ -186,5 +202,113 @@
         </sensor>
       </link>
     </model>
+    <model name="floodlight_0">
+      <static>true</static>
+      <pose>-15.000 10.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="mast">
+          <pose>0.0000 0.0000 6.0000 0.0000 0.0000 0.0000</pose>
+          <cast_shadows>true</cast_shadows>
+          <geometry><box><size>0.3500 0.3500 12.0000</size></box></geometry>
+          <material><ambient>0.2 0.2 0.22 1</ambient><diffuse>0.2 0.2 0.22 1</diffuse></material>
+        </visual>
+        <visual name="lamps">
+          <pose>0.0000 0.0000 12.6000 0.0000 0.0000 -0.4590</pose>
+          <cast_shadows>false</cast_shadows>
+          <geometry><box><size>0.4000 2.4000 1.2000</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse><emissive>1 0.97 0.9 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+    <light type="spot" name="flood_0">
+      <cast_shadows>false</cast_shadows>
+      <pose>-15.000 10.000 12.600 0 0 0</pose>
+      <diffuse>1.0 0.96 0.88 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>0.8197 -0.4051 -0.4051</direction>
+      <attenuation><range>120</range><constant>0.3</constant><linear>0.01</linear><quadratic>0.0006</quadratic></attenuation>
+      <spot><inner_angle>0.45</inner_angle><outer_angle>0.9</outer_angle><falloff>1.0</falloff></spot>
+    </light>
+    <model name="floodlight_1">
+      <static>true</static>
+      <pose>5.235 10.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="mast">
+          <pose>0.0000 0.0000 7.0000 0.0000 0.0000 0.0000</pose>
+          <cast_shadows>true</cast_shadows>
+          <geometry><box><size>0.3500 0.3500 14.0000</size></box></geometry>
+          <material><ambient>0.2 0.2 0.22 1</ambient><diffuse>0.2 0.2 0.22 1</diffuse></material>
+        </visual>
+        <visual name="lamps">
+          <pose>0.0000 0.0000 14.6000 0.0000 0.0000 -1.5708</pose>
+          <cast_shadows>false</cast_shadows>
+          <geometry><box><size>0.4000 2.4000 1.2000</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse><emissive>1 0.97 0.9 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+    <light type="spot" name="flood_1">
+      <cast_shadows>false</cast_shadows>
+      <pose>5.235 10.000 14.600 0 0 0</pose>
+      <diffuse>1.0 0.96 0.88 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>0.0000 -0.6402 -0.7682</direction>
+      <attenuation><range>120</range><constant>0.3</constant><linear>0.01</linear><quadratic>0.0006</quadratic></attenuation>
+      <spot><inner_angle>0.45</inner_angle><outer_angle>0.9</outer_angle><falloff>1.0</falloff></spot>
+    </light>
+    <model name="floodlight_2">
+      <static>true</static>
+      <pose>30.000 10.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="mast">
+          <pose>0.0000 0.0000 6.0000 0.0000 0.0000 0.0000</pose>
+          <cast_shadows>true</cast_shadows>
+          <geometry><box><size>0.3500 0.3500 12.0000</size></box></geometry>
+          <material><ambient>0.2 0.2 0.22 1</ambient><diffuse>0.2 0.2 0.22 1</diffuse></material>
+        </visual>
+        <visual name="lamps">
+          <pose>0.0000 0.0000 12.6000 0.0000 0.0000 -2.7578</pose>
+          <cast_shadows>false</cast_shadows>
+          <geometry><box><size>0.4000 2.4000 1.2000</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse><emissive>1 0.97 0.9 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+    <light type="spot" name="flood_2">
+      <cast_shadows>false</cast_shadows>
+      <pose>30.000 10.000 12.600 0 0 0</pose>
+      <diffuse>1.0 0.96 0.88 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>-0.8684 -0.3506 -0.3506</direction>
+      <attenuation><range>120</range><constant>0.3</constant><linear>0.01</linear><quadratic>0.0006</quadratic></attenuation>
+      <spot><inner_angle>0.45</inner_angle><outer_angle>0.9</outer_angle><falloff>1.0</falloff></spot>
+    </light>
+    <model name="floodlight_3">
+      <static>true</static>
+      <pose>5.235 -50.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="mast">
+          <pose>0.0000 0.0000 6.0000 0.0000 0.0000 0.0000</pose>
+          <cast_shadows>true</cast_shadows>
+          <geometry><box><size>0.3500 0.3500 12.0000</size></box></geometry>
+          <material><ambient>0.2 0.2 0.22 1</ambient><diffuse>0.2 0.2 0.22 1</diffuse></material>
+        </visual>
+        <visual name="lamps">
+          <pose>0.0000 0.0000 12.6000 0.0000 0.0000 1.5708</pose>
+          <cast_shadows>false</cast_shadows>
+          <geometry><box><size>0.4000 2.4000 1.2000</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse><emissive>1 0.97 0.9 1</emissive></material>
+        </visual>
+      </link>
+    </model>
+    <light type="spot" name="flood_3">
+      <cast_shadows>false</cast_shadows>
+      <pose>5.235 -50.000 12.600 0 0 0</pose>
+      <diffuse>1.0 0.96 0.88 1</diffuse>
+      <specular>0.4 0.4 0.4 1</specular>
+      <direction>0.0000 0.9806 -0.1961</direction>
+      <attenuation><range>120</range><constant>0.3</constant><linear>0.01</linear><quadratic>0.0006</quadratic></attenuation>
+      <spot><inner_angle>0.45</inner_angle><outer_angle>0.9</outer_angle><falloff>1.0</falloff></spot>
+    </light>
   </world>
 </sdf>

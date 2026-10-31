@@ -43,6 +43,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 G = 9.81
 CLAMP = 60.0  # draw at most this far from the origin (the ground plane is infinite)
+CONCRETE = (0.62, 0.62, 0.60, 0.85)  # ramp surfaces, as the event's (generate_stunt_world.py)
 CHASSIS_Z = 0.33  # chassis frame above base_link (nozzles.yaml is in the chassis frame)
 FAN_MG = 1.5      # fan f_max as a multiple of m g (roadster.urdf.xacro)
 # fan exhaust vents on the rear deck (chassis frame) and their blow direction,
@@ -156,11 +157,13 @@ class StuntViz(Node):
                 quad = [pt(lo[0], lo[1], z), pt(hi[0], lo[1], z), pt(hi[0], hi[1], z),
                         pt(lo[0], hi[1], z)]
                 m.points = [quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]
-                m.color = rgba(0.75, 0.55, 0.45, 0.85)
+                m.color = rgba(*CONCRETE)
+                edges = [(pt(lo[0], y, z), pt(hi[0], y, z)) for y in (lo[1], hi[1])]
             elif s['type'] == 'arc_y':
                 cx, cz = s['center_xz']
                 r, (y0, y1) = s['radius'], s['y_range']
                 n = max(8, int(math.degrees(s['theta1'] - s['theta0']) / 2))
+                edges = []
                 for k in range(n):
                     a0 = s['theta0'] + (s['theta1'] - s['theta0']) * k / n
                     a1 = s['theta0'] + (s['theta1'] - s['theta0']) * (k + 1) / n
@@ -168,10 +171,25 @@ class StuntViz(Node):
                     q = [pt(p[0][0], y0, p[0][1]), pt(p[1][0], y0, p[1][1]),
                          pt(p[1][0], y1, p[1][1]), pt(p[0][0], y1, p[0][1])]
                     m.points += [q[0], q[1], q[2], q[0], q[2], q[3]]
-                m.color = rgba(0.6, 0.6, 0.68, 0.85)
+                    edges += [(q[0], q[1]), (q[3], q[2])]
+                m.color = rgba(*CONCRETE)
             else:
                 continue
+            # per-vertex colours: with only m.color, RViz 2 (Humble) drew the
+            # triangle list black
+            m.colors = [m.color] * len(m.points)
             arr.markers.append(m)
+            # red LED strips along the riding surface's side edges, as at the event
+            led = Marker()
+            led.header.frame_id = 'odom'
+            led.ns = 'world_led'
+            led.id = i
+            led.type = Marker.LINE_LIST
+            led.scale.x = 0.08
+            led.pose.orientation.w = 1.0
+            led.points = [p for e in edges for p in e]
+            led.color = rgba(1.0, 0.08, 0.05, 1.0)
+            arr.markers.append(led)
         # Demo B: the parked vehicles to hop over, as boxes of their outer size
         for i, ob in enumerate(world.get('geometry', {}).get('obstacles', [])):
             m = Marker()
