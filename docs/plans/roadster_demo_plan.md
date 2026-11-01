@@ -392,6 +392,9 @@ Visual only: collision, inertia, frames and the maps are unchanged, and the URDF
   A pleated red drape stands on the far side from the trackside camera, with light towers whose spot lights cast no shadows; the moon casts the only shadows.
   The night worlds carry their own `<gui>`, because the Gazebo window's 3D view otherwise applies the stock 0.4 ambient and 0.8 grey background over the world's `<scene>`.
 - **RViz:** the ramp markers are concrete with red LED edges and now carry per-vertex colours; with only `color` set, RViz 2 drew the triangle lists black.
+  An instrument row (`stunt_viz.py`, params `gauge_x`, `gauge_z`, `gauge_h`) sits in the free sky above the ramp in the default side-on view.
+  It shows the gas tank draining (green while the feed is regulated, amber in blowdown, red below the firing floor; kg, bar and feed %), total thrust and fan suction bars in m g with 1 g ticks (hover, inverted hold), a mini roadster in a glass ball at the IMU-estimated attitude, and |f| and |w| bars from the IMU.
+  It is world-anchored, so it leaves the frame when the camera orbits far; a screen-fixed version would need `ros-humble-rviz-2d-overlay-plugins`.
 - **Onboard camera:** moved into the nose, just above the light bar (x 2.16, z 0.48 m), where nothing of the car is in view; the sedan's mount floated 0.9 m above this car's nose, and a roof mount showed half a frame of hood.
 
 Cost: the trackside camera renders the richer scene, and Demo A's real-time factor went from 0.75-0.77 to 0.70-0.71 (two runs each), most of it from the four spot lights (0.74 without them).

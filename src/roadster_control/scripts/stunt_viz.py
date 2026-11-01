@@ -19,6 +19,11 @@ Publishes:
                     control: requested (red) vs allocated (yellow) thrust
                     force and requested torque (cyan) at the COM, per-wheel
                     drive/brake torque arrows, and a control panel
+  /stunt/viz (also) instrument row in the sky above the ramp: the gas tank
+                    draining (green regulated, amber blowdown, red empty),
+                    total thrust and fan suction bars (1 g ticks: hover,
+                    inverted hold), a mini roadster in a glass ball at the
+                    IMU-estimated attitude, and |f| / |w| bars from the IMU
   /stunt/trail      Path of base_link in the odom (= world) frame (truth)
   /stunt/trail_est  the same from /odom_est (IMU state estimate)
 
@@ -90,6 +95,13 @@ class StuntViz(Node):
         self.hud_top = self.declare_parameter('hud_top', 21.0).value
         self.hud_size = self.declare_parameter('hud_size', 0.55).value
         self.hud_gap = self.declare_parameter('hud_gap', 0.8).value
+        # instrument row (world frame): left edge, base height and gauge
+        # height, in the free sky above the ramp right of the HUD column
+        self.gauge_x = self.declare_parameter('gauge_x', -14.0).value
+        self.gauge_z = self.declare_parameter('gauge_z', 19.2).value
+        self.gauge_h = self.declare_parameter('gauge_h', 2.8).value
+        self.gas_full = 0.0  # the first (largest) tank mass seen = a full tank
+        self.tank_pa = None
         geo = yaml.safe_load(open(nozzles_file))['nozzles']
         self.nozzles = sorted(geo)
         self.nozzle_geo = [(geo[n]['xyz'], [-c for c in geo[n]['force_dir']], geo[n]['f_max_mg'])
@@ -125,6 +137,8 @@ class StuntViz(Node):
         self.last_est_t = -1.0
         self.pub_trail_est = self.create_publisher(Path, '/stunt/trail_est', 10)
         self.create_subscription(Imu, '/imu', lambda m: setattr(self, 'imu', m), 10)
+        self.create_subscription(Float64, '/roadster/tank/pressure',
+                                 lambda m: setattr(self, 'tank_pa', m.data), 10)
         self.create_subscription(Odometry, '/odom_est', self._odom_est, 50)
 
         self.pub_world.publish(self.world_markers(world_json))
@@ -286,6 +300,7 @@ class StuntViz(Node):
                        f'flip {math.degrees(s.roll_progress):5.1f} deg   gas {s.tank_mass:5.1f} kg')]
             panels += self.imu_and_control(arr, s, p, q)
             self.hud(arr, panels)
+            self.gauges(arr, s, q)
         self.pub.publish(arr)
         self.pub_trail.publish(self.trail)
         self.pub_trail_est.publish(self.trail_est)
@@ -304,6 +319,131 @@ class StuntViz(Node):
             arr.markers.append(self.text(0, ns, pt(self.hud_x, 0.0, top - n * line / 2),
                                          body, color, size))
             top -= n * line + self.hud_gap
+
+    # ------------------------------------------------------------ instruments
+    def shape(self, ns, mid, kind, pos, scale, color, q=(0.0, 0.0, 0.0, 1.0)):
+        m = Marker()
+        m.header.frame_id = 'odom'
+        m.ns = ns
+        m.id = mid
+        m.type = kind
+        m.pose.position = pt(*pos)
+        (m.pose.orientation.x, m.pose.orientation.y, m.pose.orientation.z,
+         m.pose.orientation.w) = (float(c) for c in q)
+        m.scale.x, m.scale.y, m.scale.z = (float(c) for c in scale)
+        m.color = color
+        return m
+
+    def gauge_label(self, arr, ns, x, body, color=None):
+        """Caption under a gauge, top line just below its base."""
+        n = body.count('\n') + 1
+        size = 0.48
+        z = self.gauge_z - 0.45 - n * size * 1.3 / 2
+        arr.markers.append(self.text(99, ns, pt(x, 0.0, z), body,
+                                     color or rgba(1, 1, 1, 1), size))
+
+    def bar(self, arr, ns, x, value, vmax, color, ticks, label):
+        """Vertical bar gauge: outline, fill to value / vmax, labelled ticks."""
+        base, h, w = self.gauge_z, self.gauge_h, 0.9
+        frac = min(max(value / vmax, 0.0), 1.0)
+        box = self.shape(ns, 0, Marker.LINE_STRIP, (0, 0, 0), (0.05, 0, 0),
+                         rgba(0.9, 0.9, 0.95, 0.8))
+        box.points = [pt(x - w / 2, 0, base), pt(x + w / 2, 0, base), pt(x + w / 2, 0, base + h),
+                      pt(x - w / 2, 0, base + h), pt(x - w / 2, 0, base)]
+        arr.markers.append(box)
+        fill_h = max(frac * h, 0.001)
+        arr.markers.append(self.shape(ns, 1, Marker.CUBE, (x, 0, base + fill_h / 2),
+                                      (w - 0.12, 0.3, fill_h),
+                                      color if frac > 0.003 else rgba(0, 0, 0, 0)))
+        tk = self.shape(ns, 2, Marker.LINE_LIST, (0, 0, 0), (0.06, 0, 0), rgba(1, 0.95, 0.4, 1))
+        for i, (v, name) in enumerate(ticks):
+            z = base + h * v / vmax
+            tk.points += [pt(x - w / 2 - 0.2, 0, z), pt(x + w / 2 + 0.2, 0, z)]
+            arr.markers.append(self.text(10 + i, ns, pt(x - w / 2 - 0.65, 0.0, z), name,
+                                         rgba(1, 0.95, 0.4, 1), 0.42))
+        arr.markers.append(tk)
+        self.gauge_label(arr, ns, x, label)
+
+    def gauges(self, arr, s, q_truth):
+        """The instrument row: gas tank, thrust and suction bars, IMU attitude
+        ball, |f| and |w| bars. World-anchored (no overlay plugin needed)."""
+        mg = self.mass * G
+        x0, base, h = self.gauge_x, self.gauge_z, self.gauge_h
+
+        # ---- gas tank: shell, end domes, valve and the gas, coloured by feed
+        self.gas_full = max(self.gas_full, s.tank_mass)
+        frac = s.tank_mass / self.gas_full if self.gas_full > 0 else 0.0
+        if s.feed_ratio >= 0.999:
+            gas = rgba(0.2, 0.85, 0.35, 0.95)   # regulated feed: full thrust
+        elif s.feed_ratio > 0.0:
+            gas = rgba(1.0, 0.65, 0.1, 0.95)    # blowdown: thrust falling
+        else:
+            gas = rgba(1.0, 0.15, 0.1, 0.95)    # below the firing floor
+        tx, r = x0 + 1.2, 1.0
+        glass = rgba(0.8, 0.85, 0.92, 0.18)
+        arr.markers.append(self.shape('gauge_tank', 0, Marker.CYLINDER, (tx, 0, base + h / 2),
+                                      (2 * r, 2 * r, h), glass))
+        for i, z in enumerate((base, base + h)):
+            arr.markers.append(self.shape('gauge_tank', 1 + i, Marker.SPHERE, (tx, 0, z),
+                                          (2 * r, 2 * r, 0.7), glass))
+        arr.markers.append(self.shape('gauge_tank', 3, Marker.CUBE, (tx, 0, base + h + 0.5),
+                                      (0.3, 0.3, 0.35), rgba(0.7, 0.55, 0.25, 1)))
+        fill_h = max(frac * h, 0.001)
+        arr.markers.append(self.shape('gauge_tank', 4, Marker.CYLINDER,
+                                      (tx, 0, base + fill_h / 2), (1.8 * r, 1.8 * r, fill_h),
+                                      gas if frac > 0.002 else rgba(0, 0, 0, 0)))
+        bar_txt = f'{self.tank_pa / 1e5:.0f} bar\n' if self.tank_pa is not None else ''
+        self.gauge_label(arr, 'gauge_tank', tx,
+                         f'GAS {s.tank_mass:.1f} kg\n{bar_txt}feed {100 * s.feed_ratio:.0f}%', gas)
+
+        # ---- thrust and suction, in m g; the 1 g ticks are hover and the
+        # inverted hold (the fan must out-pull gravity upside down)
+        thrust = sum(self.thrust)
+        self.bar(arr, 'gauge_thrust', x0 + 4.8, thrust / mg, 6.0, rgba(1.0, 0.55, 0.1, 0.95),
+                 [(1.0, '1g')], f'THRUST\n{thrust / 1000:.1f} kN\n{thrust / mg:.2f} g')
+        self.bar(arr, 'gauge_fan', x0 + 8.0, self.fan / mg, FAN_MG, rgba(0.25, 0.6, 1.0, 0.95),
+                 [(1.0, '1g')], f'SUCTION\n{self.fan / 1000:.1f} kN\n{self.fan / mg:.2f} g')
+
+        # ---- attitude ball: a mini roadster at the IMU-estimated attitude
+        # (truth until the estimate arrives) inside glass, with a horizon ring
+        qq = (self.odom_est.pose.pose.orientation if self.odom_est is not None else None)
+        q = (qq.x, qq.y, qq.z, qq.w) if qq is not None else q_truth
+        bx, bz, br, k = x0 + 12.4, base + h / 2, 1.6, 0.55
+        arr.markers.append(self.shape('gauge_attitude', 0, Marker.SPHERE, (bx, 0, bz),
+                                      (2 * br, 2 * br, 2 * br), rgba(0.75, 0.85, 1.0, 0.12)))
+        ring = self.shape('gauge_attitude', 1, Marker.LINE_STRIP, (0, 0, 0), (0.05, 0, 0),
+                          rgba(0.6, 0.9, 1.0, 0.9))
+        ring.points = [pt(bx + br * math.cos(2 * math.pi * i / 48),
+                          br * math.sin(2 * math.pi * i / 48), bz) for i in range(49)]
+        arr.markers.append(ring)
+        meshes = [('roadster_body.dae', (0.0, 0.0, 0.0))]
+        meshes += [('roadster_wheel.dae', (wx, wy, 0.0))
+                   for wx in (1.35, -1.35) for wy in (0.8, -0.8)]
+        for i, (mesh, off) in enumerate(meshes):
+            o = quat_rot(q, tuple(c * k for c in off))
+            m = self.shape('gauge_attitude', 2 + i, Marker.MESH_RESOURCE,
+                           (bx + o[0], o[1], bz + o[2]), (k, k, k), rgba(0, 0, 0, 0), q)
+            m.mesh_resource = f'package://roadster_description/meshes/{mesh}'
+            m.mesh_use_embedded_materials = True
+            arr.markers.append(m)
+        x, y, z, w = q
+        roll = math.degrees(math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)))
+        pitch = math.degrees(math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x)))))
+        self.gauge_label(arr, 'gauge_attitude', bx,
+                         f'IMU ATTITUDE\nroll {roll:+.0f} deg\npitch {pitch:+.0f} deg',
+                         rgba(0.6, 1.0, 0.6, 1.0))
+
+        # ---- IMU magnitudes: specific force in g and rotation rate in deg/s
+        if self.imu is not None:
+            f, wv = self.imu.linear_acceleration, self.imu.angular_velocity
+            fg = math.sqrt(f.x * f.x + f.y * f.y + f.z * f.z) / G
+            rate = math.degrees(math.sqrt(wv.x * wv.x + wv.y * wv.y + wv.z * wv.z))
+            fcol = (rgba(0.2, 1.0, 0.3, 0.95) if fg < 2.5 else
+                    rgba(1.0, 0.65, 0.1, 0.95) if fg < 4.0 else rgba(1.0, 0.15, 0.1, 0.95))
+            self.bar(arr, 'gauge_imu_f', x0 + 16.8, fg, 5.0, fcol, [(1.0, '1g')],
+                     f'IMU |f|\n{fg:.2f} g')
+            self.bar(arr, 'gauge_imu_w', x0 + 20.0, rate, 500.0, rgba(1.0, 0.25, 1.0, 0.95),
+                     [(180.0, '180')], f'IMU |w|\n{rate:.0f} deg/s')
 
     # ------------------------------------------------------------ IMU + control
     def text(self, mid, ns, pos, body, color, size=0.45):
