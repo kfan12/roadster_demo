@@ -8,20 +8,23 @@ no ray queries) and what the stunt controller reads for ramp-frame tracking.
 
 Kinds:
   ceiling  flat ground + a horizontal slab overhead (fan inverted-hold test)
-  ramp     run-in road -> circular quarter-pipe arc of radius R continuing to
-           `arc_deg` (180 = fully inverted) -> horizontal overhang back over
-           the run-in, so a car flying off its end lands on flat road
+  ramp     run-in road -> circular arc of radius R continuing to `arc_deg`
+           -> a straight "ceiling" (the overhang) on from the arc's end along
+           its tangent, back over the run-in, so a car flying off its end
+           lands on flat road. arc_deg = 180 makes the ceiling horizontal;
+           the default 170 tilts it 10 deg upward away from the loop, as on
+           Tesla's ramp
   launch   straight runway with a distance mark every 10 m (Demo C, 0-60 mph)
   hop      runway with a row of parked vehicles across it, as boxes of their
            real outer size (Model 3, Model Y, Semi, Cybertruck, Cybercab), and
            a landing zone past them (Demo B, the obstacle hop)
 
 Ramp frame (x forward along the run-in, z up): the arc's centre is (0, R), so
-its bottom is tangent to the ground at x = 0 and an inverted car at the top
-(z = 2R) travels in -x onto the overhang. The overhang must extend far enough
-in -x for the car to stop on it, hold, then accelerate forward upside down and
-fly off its far end over flat road; --overhang-len defaults to 5 m, just longer
-than the car (the Tesla ramp ends shortly past the top of the loop).
+its bottom is tangent to the ground at x = 0, and a car near the top travels in
+-x onto the overhang, upside down. In Demo A the car stops on the upper arc,
+holds, then drives on its tyres alone (fan suction gives the traction) up onto
+the ceiling and flies off its far end over flat road; --overhang-len (6 m) is
+that ceiling past the arc (the Tesla ramp ends shortly past the top of the loop).
 
 Usage:
   python3 scripts/generate_stunt_world.py --kind ceiling --height 6
@@ -429,11 +432,12 @@ def led_edges(length, W, t):
     return out
 
 
-def ramp_structure(R, W, t, L, arc_full):
+def ramp_structure(R, W, t, L, start, tang):
     """Visual-only truss: a tower behind the loop, ribs from it to the arc's
-    back face, and (for the 180 deg ramp) a top girder over the overhang. All
-    columns stand outside the car's lane or behind the loop, but none has
-    collision anyway."""
+    back face, and a girder over the L m overhang, parallel to it. `start` is
+    the arc's end (x, z) on the riding surface, `tang` the overhang's unit
+    direction (x, z). All columns stand outside the car's lane or behind the
+    loop, but none has collision anyway."""
     w = 0.16
     xs = (R + t + 1.2, R + t + 2.6)  # tower columns, behind the loop
     ys = (W / 2 - 0.4, -(W / 2 - 0.4))
@@ -463,19 +467,28 @@ def ramp_structure(R, W, t, L, arc_full):
             for y in ys:
                 add((xb, y, z), (xs[0], y, z))
         z0 = z
-    if arc_full:
-        # girder over the overhang: top chords, verticals and diagonals
-        zt, zb = 2 * R + t + 1.2, 2 * R + t + 0.1
-        x_end = -L
-        for y in (W / 2 + 0.3, -(W / 2 + 0.3)):
-            add((xs[1], y, zt), (x_end, y, zt), glow=True)
-            add((R * 0.3, y, zb), (x_end, y, zb))
-            n = 6
-            for i in range(n + 1):
-                x = x_end + (R * 0.3 - x_end) * i / n
-                add((x, y, zb), (x, y, zt))
-                if i < n:
-                    add((x, y, zb), (x + (R * 0.3 - x_end) / n, y, zt))
+    # girder over the overhang, following its slope: a bottom chord just above
+    # the slab's back face, from over the arc's end to the free end, a glowing
+    # top chord from the tower, verticals and diagonals in between
+
+    def over(d, lift):
+        """(x, z) at distance d along the overhang (d < 0: back over the
+        arc), `lift` above the slab's back face."""
+        return start[0] + tang[0] * d, start[1] + tang[1] * d + t + lift
+
+    d0, d1, n = -R * 0.3, L, 6
+    for y in (W / 2 + 0.3, -(W / 2 + 0.3)):
+        (_, z0t), (x1t, z1t) = over(d0, 1.2), over(d1, 1.2)
+        add((xs[1], y, z0t), (x1t, y, z1t), glow=True)
+        (x0b, z0b), (x1b, z1b) = over(d0, 0.1), over(d1, 0.1)
+        add((x0b, y, z0b), (x1b, y, z1b))
+        for i in range(n + 1):
+            d = d0 + (d1 - d0) * i / n
+            (xb, zb), (xt, zt) = over(d, 0.1), over(d, 1.2)
+            add((xb, y, zb), (xb, y, zt))
+            if i < n:
+                xn, zn = over(d + (d1 - d0) / n, 1.2)
+                add((xb, y, zb), (xn, y, zn))
     return visual_model('ramp_structure', vis)
 
 
@@ -488,7 +501,7 @@ def build_ramp(a):
     d = arc / n
     # Inscribed polygon: every box's inner face is the chord between two
     # vertices ON the radius-R circle, so consecutive faces meet exactly and the
-    # last vertex lands exactly on the overhang (z = 2R) and the first on the
+    # last vertex lands exactly on the overhang's start and the first on the
     # ground. (Tangent-at-midpoint boxes left their ends R / cos(d/2) - R =
     # 2.7 mm outside the circle: a step onto the overhang that briefly
     # unloaded a wheel to 0.2 kN at 6 m/s.) The `overlap` extension of each box
@@ -502,8 +515,8 @@ def build_ramp(a):
         pitch = math.atan2(-math.cos(th), -math.sin(th))  # box x along the arc tangent
         links += box_link(f'arc_{i:03d}', x, 0.0, z, pitch, seg_len, W, t, a.mu,
                           CONCRETE, led_edges(seg_len, W, t))
-    # overhang: continues from the arc's end; for arc = 180 deg that is a flat
-    # ceiling at z = 2R running in -x
+    # overhang: continues from the arc's end along its tangent, a ceiling
+    # running in -x that rises at 180 - arc_deg (flat at z = 2R for 180)
     top_x, top_z = R * math.cos(th1), R + R * math.sin(th1)
     tang = (-math.sin(th1), math.cos(th1))  # direction of travel at the arc end
     outward = (math.cos(th1), math.sin(th1))  # away from the arc centre
@@ -514,7 +527,7 @@ def build_ramp(a):
     links += box_link('overhang', ocx, 0.0, ocz, pitch_o, L + a.overlap, W, t, a.mu,
                       CONCRETE, led_edges(L + a.overlap, W, t))
     sdf = ground(300, 60, -60, 2.0)
-    sdf += ramp_structure(R, W, t, L, arc_full=abs(a.arc_deg - 180.0) < 1e-6)
+    sdf += ramp_structure(R, W, t, L, (top_x, top_z), tang)
     # pleated red drape on the far side from the trackside camera, and light
     # towers (the camera-side one stands behind the camera)
     sdf += visual_model('backdrop', curtain(x0=-50.0, x1=20.0, y=W / 2 + 9.0, h=12.0))
@@ -535,16 +548,28 @@ def build_ramp(a):
         {'type': 'arc_y', 'name': 'ramp_arc', 'center_xz': [0.0, R], 'radius': R,
          'theta0': th0, 'theta1': th1, 'y_range': [-W / 2, W / 2]},
     ]
-    if abs(a.arc_deg - 180.0) < 1e-6:
-        surfaces.append(plane_surface(
-            'overhang', [0, 0, 2 * R], [0, 0, -1],
-            [-L - 0.5, -W / 2, R], [0.5, W / 2, 2 * R + 0.5]))
+    # the overhang's riding surface: the plane through the arc's end, its free
+    # side towards the arc centre. The validity box is the slab plus 0.5 m,
+    # from the loop's mid-height up; near the seam the arc is nearer anyway.
+    # `corners` is the riding face itself, for drawing.
+    end_x, end_z = top_x + tang[0] * L, top_z + tang[1] * L
+    surfaces.append(plane_surface(
+        'overhang', [round(top_x, 6), 0.0, round(top_z, 6)],
+        [round(-outward[0], 9), 0.0, round(-outward[1], 9)],
+        [round(min(top_x, end_x) - 0.5, 6), -W / 2, R],
+        [round(max(top_x, end_x) + 0.5, 6), W / 2, round(max(top_z, end_z) + 0.5, 6)]))
+    surfaces[-1]['corners'] = [[round(x, 6), y, round(z, 6)] for x, z, y in (
+        (top_x, top_z, -W / 2), (end_x, end_z, -W / 2), (end_x, end_z, W / 2),
+        (top_x, top_z, W / 2))]
     spawn = {'x': -a.run_in, 'y': 0.0, 'z': 0.05, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0}
     geometry = {'kind': 'ramp', 'radius': R, 'arc_deg': a.arc_deg, 'width': W,
                 'thickness': t, 'overhang_len': L, 'run_in': a.run_in,
                 'arc_center_xz': [0.0, R], 'arc_theta': [th0, th1],
+                'ceiling_tilt_deg': 180.0 - a.arc_deg,
+                'overhang_start_xz': [round(top_x, 6), round(top_z, 6)],
+                'overhang_end_xz': [round(end_x, 6), round(end_z, 6)],
                 'landing_width': a.landing_width, 'landing_x': a.landing_x,
-                'drop_height': 2 * R if abs(a.arc_deg - 180.0) < 1e-6 else None}
+                'drop_height': round(end_z, 6)}  # the ceiling's free edge
     return sdf, surfaces, spawn, geometry
 
 
@@ -643,11 +668,13 @@ def main():
     ap.add_argument('--slab-len', type=float, default=20.0)
     # ramp
     ap.add_argument('--radius', type=float, default=8.0)
-    ap.add_argument('--arc-deg', type=float, default=180.0)
+    ap.add_argument('--arc-deg', type=float, default=170.0,
+                    help='arc up to the ceiling (overhang), which then rises at 180 - arc_deg '
+                         'away from the loop (180: horizontal)')
     ap.add_argument('--seg-deg', type=float, default=3.0, help='box-chain segment angle')
     ap.add_argument('--overlap', type=float, default=0.02, help='segment length overlap [m]')
-    ap.add_argument('--overhang-len', type=float, default=5.0,
-                    help='just past the top: room for the car (4.5 m) to stop and hold')
+    ap.add_argument('--overhang-len', type=float, default=6.0,
+                    help='the ceiling past the arc: the run-up, on the tyres, to the release [m]')
     ap.add_argument('--run-in', type=float, default=None,
                     help='spawn distance before the ramp (25) or the hop row (60)')
     ap.add_argument('--landing-width', type=float, default=12.0,

@@ -50,13 +50,47 @@ inline Vec3 attitudeError(const Quat & q_ref, const Quat & q)
 }
 
 // A rotation of `total_angle` about one body axis of the start attitude q0,
-// shaped by a minimum-jerk profile over `duration` starting at t_start.
+// shaped by a minimum-jerk profile over `duration` starting at t_start, then
+// an optional small correction `c` (a rotation vector in the body frame the
+// flip ends in) on its own minimum-jerk profile over `correction_duration`:
+//   q(t) = q0 A(a(t)) C(s(t)),  A = rotation a about the axis, C(s) = exp(s c)
+// ending at q0 A(total) exp(c). It levels a flip that starts pitched (off the
+// tilted ceiling), which the roll alone would end nose-up. The correction
+// comes after the roll, not blended into it: during a fast roll a fixed
+// pitch correction's axis sweeps round the body, and mid-roll it is a body
+// YAW rate, which only the rear nozzles can torque (with a big forward push:
+// 15 kN.m of yaw, 16 kN.s of rear thrust and a 16 m/s touchdown, tilt_imu1).
+// One at a time, the body rate and acceleration are those of the moving part.
 class FlipReference
 {
 public:
   FlipReference(const Quat & q0, const Vec3 & body_axis, double total_angle,
-    double t_start, double duration)
-  : q0_(q0), axis_(body_axis.normalized()), total_(total_angle), t0_(t_start), T_(duration) {}
+    double t_start, double duration, const Vec3 & correction = Vec3::Zero(),
+    double correction_duration = 0.0)
+  : q0_(q0), axis_(body_axis.normalized()), total_(total_angle), t0_(t_start), T_(duration),
+    c_(correction), Tc_(correction.norm() > 1e-12 ? correction_duration : 0.0) {}
+
+  // The correction that makes a flip of `total_angle` about `body_axis` from
+  // q0 end upright (body z along world z) with its heading kept: the end
+  // attitude's forward axis, made horizontal. Undefined (zero) if that axis
+  // ends near vertical.
+  static Vec3 levelingCorrection(const Quat & q0, const Vec3 & body_axis, double total_angle)
+  {
+    const Mat3 R_end = (q0 * Quat(Eigen::AngleAxisd(total_angle, body_axis.normalized())))
+      .toRotationMatrix();
+    Vec3 x = R_end.col(0);
+    x.z() = 0.0;
+    if (x.norm() < 0.1) {
+      return Vec3::Zero();
+    }
+    x.normalize();
+    Mat3 R_level;
+    R_level.col(0) = x;
+    R_level.col(2) = Vec3::UnitZ();
+    R_level.col(1) = Vec3::UnitZ().cross(x);
+    const Eigen::AngleAxisd c(R_end.transpose() * R_level);
+    return c.axis() * c.angle();
+  }
 
   struct Sample
   {
@@ -71,21 +105,38 @@ public:
     const Blend b = minJerk(T_ > 0 ? (t - t0_) / T_ : 1.0);
     const bool moving = T_ > 0 && t > t0_ && t < t0_ + T_;
     const double a = total_ * b.s;
+    const double t1 = t0_ + T_;  // the correction's start
+    const Blend bc = minJerk(Tc_ > 0 ? (t - t1) / Tc_ : 1.0);
+    const bool correcting = Tc_ > 0 && t > t1 && t < t1 + Tc_;
+    const double cn = c_.norm();
+    const Quat C = cn > 1e-12 ? Quat(Eigen::AngleAxisd(bc.s * cn, c_ / cn)) : Quat::Identity();
     Sample s;
-    s.q = q0_ * Quat(Eigen::AngleAxisd(a, axis_));
-    s.w = moving ? Vec3(axis_ * total_ * b.ds / T_) : Vec3::Zero();
-    s.alpha = moving ? Vec3(axis_ * total_ * b.dds / (T_ * T_)) : Vec3::Zero();
+    s.q = q0_ * Quat(Eigen::AngleAxisd(a, axis_)) * C;
+    if (moving) {
+      s.w = axis_ * total_ * b.ds / T_;
+      s.alpha = axis_ * total_ * b.dds / (T_ * T_);
+    } else if (correcting) {
+      s.w = c_ * bc.ds / Tc_;
+      s.alpha = c_ * bc.dds / (Tc_ * Tc_);
+    } else {
+      s.w = Vec3::Zero();
+      s.alpha = Vec3::Zero();
+    }
     s.angle = a;
     return s;
   }
 
-  double endTime() const {return t0_ + T_;}
+  // the roll's end, and the end of the whole reference (with the correction)
+  double rollEndTime() const {return t0_ + T_;}
+  double endTime() const {return t0_ + T_ + Tc_;}
   const Vec3 & axis() const {return axis_;}
 
 private:
   Quat q0_;
   Vec3 axis_;
   double total_, t0_, T_;
+  Vec3 c_;
+  double Tc_;
 };
 
 // Body torque for a PD on the rotation-vector error with reference rate and

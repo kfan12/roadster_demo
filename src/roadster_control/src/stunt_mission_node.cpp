@@ -1,13 +1,16 @@
 // stunt_mission_node.cpp - roadster stunt mission FSM + ground and flight control.
 //
-// Mode "ramp" (Demo A, the inverted ramp):
+// Mode "ramp" (Demo A, the inverted ramp, as Tesla flew it): the arc ends
+// short of 180 deg and the ceiling (the overhang) continues along its
+// tangent, rising away from the loop.
 //   ACCELERATE     fan on, speed up along the run-in toward the ramp
-//   CLIMB          round the quarter-pipe arc at climb_speed, held on by the fan
-//   STOP           brake (starting on the upper arc) to a stop at hold_x, just past the top
-//   HOLD_INVERTED  stationary, upside down, fan only, for hold_inverted_time
-//   DRIVE_OFF      from standstill, still upside down, accelerate forward (wheels
-//                  plus the rear nozzles) to drive_off_speed and let go near the
-//                  overhang's end
+//   CLIMB          round the arc at climb_speed, held on by the fan
+//   STOP           brake to a stop on the upper arc, at hold_arc_deg
+//   HOLD_INVERTED  stationary, (mostly) upside down, fan only, for hold_inverted_time
+//   DRIVE_OFF      from standstill, accelerate on the tyres alone (the fan's
+//                  suction is their grip; rear thrust only with
+//                  drive_off_rear_thrust) over the rest of the arc and up the
+//                  ceiling, and let go near its end
 //   ...then the flight sequence below, flipping with that forward speed
 //   (or stay held if release_after_hold is false)
 // Mode "drop" (the flight half on its own): the car starts upside down under a
@@ -40,7 +43,9 @@
 // Flight sequence (both modes):
 //   RELEASE        fan off, hold the start attitude while the car falls clear
 //   FLIP           track a minimum-jerk rotation of flip_turns turns about the
-//                  body flip_axis (0.5 turn: inverted -> upright, plan correction 1)
+//                  body flip_axis (0.5 turn: inverted -> upright, plan correction 1),
+//                  levelled on the way: off the tilted ceiling the roll alone
+//                  would end nose-up by the tilt
 // Throughout the flight the thrust demand also brakes the lateral (world y)
 // velocity: the kick flip rolls on one side's bottom pair, whose push drifts
 // the car sideways, and the side nozzles cancel it.
@@ -109,11 +114,11 @@ public:
   : Node("stunt_mission_node")
   {
     mode_ = declare_parameter<std::string>("mode", "drop");
-    mass_ = declare_parameter<double>("mass", 1800.01);
+    mass_ = declare_parameter<double>("mass", 1700.01);
     inertia_ = vec3Param(declare_parameter<std::vector<double>>(
-        "inertia_diag", {597.9, 3123.4, 3582.4})).asDiagonal();
+        "inertia_diag", {566.8, 2950.6, 3386.7})).asDiagonal();
     com_chassis_ = vec3Param(declare_parameter<std::vector<double>>(
-        "com_chassis", {0.0075, 0.0, 0.0}));
+        "com_chassis", {0.0079, 0.0, 0.0}));
     chassis_z_ = declare_parameter<double>("chassis_offset_z", 0.33);
     landed_com_height_ = declare_parameter<double>("landed_com_height", 0.33);
     // flight
@@ -123,6 +128,7 @@ public:
     flip_turns_ = declare_parameter<double>("flip_turns", 0.5);
     flip_delay_ = declare_parameter<double>("flip_delay", 0.4);
     flip_duration_ = declare_parameter<double>("flip_duration", 0.8);
+    flip_level_duration_ = declare_parameter<double>("flip_level_duration", 0.4);
     gains_.kp = vec3Param(declare_parameter<std::vector<double>>("att_kp", {36.0, 36.0, 36.0}));
     gains_.kd = vec3Param(declare_parameter<std::vector<double>>("att_kd", {10.8, 10.8, 10.8}));
     LandingParams lp;
@@ -153,7 +159,7 @@ public:
     climb_speed_ = declare_parameter<double>("climb_speed", 6.0);
     accel_ = declare_parameter<double>("accel", 2.0);
     stop_decel_ = declare_parameter<double>("stop_decel", 3.0);
-    hold_x_ = declare_parameter<double>("hold_x", -1.5);
+    hold_arc_deg_ = declare_parameter<double>("hold_arc_deg", 150.0);
     hold_kx_ = declare_parameter<double>("hold_kx", 1.0);
     hold_inverted_time_ = declare_parameter<double>("hold_inverted_time", 1.0);
     stop_tol_ = declare_parameter<double>("stop_tolerance", 0.15);
@@ -161,6 +167,7 @@ public:
     release_after_hold_ = declare_parameter<bool>("release_after_hold", true);
     drive_off_speed_ = declare_parameter<double>("drive_off_speed", 7.0);
     drive_off_accel_ = declare_parameter<double>("drive_off_accel", 2.5);
+    drive_off_rear_thrust_ = declare_parameter<bool>("drive_off_rear_thrust", false);
     drive_off_flip_delay_ = declare_parameter<double>("drive_off_flip_delay", 0.6);
     release_margin_ = declare_parameter<double>("release_margin", 0.5);
     wheelbase_ = declare_parameter<double>("wheelbase", 2.7);
@@ -301,20 +308,26 @@ private:
     ramp_r_ = j.at("radius");
     ramp_cx_ = j.at("arc_center_xz")[0];
     ramp_cz_ = j.at("arc_center_xz")[1];
-    arc_len_ = ramp_r_ * (static_cast<double>(j.at("arc_theta")[1]) -
-      static_cast<double>(j.at("arc_theta")[0]));
-    const double overhang_end = ramp_cx_ - static_cast<double>(j.at("overhang_len"));
-    // let go while the front axle (wheelbase / 2 ahead of base_link, in -x)
-    // is still release_margin short of the edge
-    const double release_x = overhang_end + wheelbase_ / 2.0 + release_margin_;
-    s_hold_ = arc_len_ + (ramp_cx_ - hold_x_);
-    s_release_ = arc_len_ + (ramp_cx_ - release_x);
-    if (hold_x_ - wheelbase_ / 2.0 < release_x - 0.05 || hold_x_ + wheelbase_ / 2.0 > ramp_cx_) {
-      RCLCPP_WARN(get_logger(), "hold_x %.2f does not put both axles on the overhang "
-        "[%.2f, %.2f]", hold_x_, overhang_end, ramp_cx_);
+    const double th0 = j.at("arc_theta")[0], th1 = j.at("arc_theta")[1];
+    arc_len_ = ramp_r_ * (th1 - th0);
+    const double overhang_len = j.at("overhang_len");
+    // the overhang (ceiling) starts at the arc's end and runs along its tangent
+    oh_x0_ = ramp_cx_ + ramp_r_ * std::cos(th1);
+    oh_z0_ = ramp_cz_ + ramp_r_ * std::sin(th1);
+    oh_tx_ = -std::sin(th1);
+    oh_tz_ = std::cos(th1);
+    // hold on the arc (angle from its bottom); let go while the front axle
+    // (wheelbase / 2 ahead of base_link) is still release_margin short of the
+    // ceiling's edge
+    s_hold_ = ramp_r_ * hold_arc_deg_ * M_PI / 180.0;
+    s_release_ = arc_len_ + overhang_len - wheelbase_ / 2.0 - release_margin_;
+    if (s_hold_ + wheelbase_ / 2.0 > arc_len_ + 0.05) {
+      RCLCPP_WARN(get_logger(), "hold_arc_deg %.1f puts the front axle past the arc's end "
+        "(%.1f deg)", hold_arc_deg_, (th1 - th0) * 180.0 / M_PI);
     }
-    RCLCPP_INFO(get_logger(), "hold at s = %.2f m, let go at s = %.2f m (%.2f m of run-up)",
-      s_hold_, s_release_, s_release_ - s_hold_);
+    RCLCPP_INFO(get_logger(), "ceiling tilted %.1f deg up; hold at s = %.2f m (%.0f deg), let go "
+      "at s = %.2f m (%.2f m of run-up)", 180.0 - (th1 - th0) * 180.0 / M_PI, s_hold_,
+      hold_arc_deg_, s_release_, s_release_ - s_hold_);
   }
 
   void loadHop(const std::string & path)
@@ -357,15 +370,18 @@ private:
   }
 
   // distance along the track at base_link (which sits on the driving surface):
-  // run-in (< 0), the arc (0 .. arc length), then the overhang
+  // run-in (< 0), the arc (0 .. arc length), then the overhang along its
+  // tangent (past the arc's end: beyond the line through the arc centre and
+  // the arc's end, in the upper half)
   double pathS(const Vec3 & p) const
   {
     const double dx = p.x() - ramp_cx_, dz = p.z() - ramp_cz_;
     if (dz < 0.0 && dx < 0.0) {
       return dx;
     }
-    if (dz >= 0.0 && dx < 0.0) {
-      return arc_len_ - dx;
+    const double d_oh = (p.x() - oh_x0_) * oh_tx_ + (p.z() - oh_z0_) * oh_tz_;
+    if (dz >= 0.0 && d_oh > 0.0) {
+      return arc_len_ + d_oh;
     }
     return std::clamp(ramp_r_ * (std::atan2(dz, dx) + M_PI / 2), 0.0, arc_len_);
   }
@@ -419,8 +435,10 @@ private:
   void startFlight(const Quat & q, double t, std::optional<double> delay = std::nullopt)
   {
     flip_delay_now_ = delay.value_or(flip_delay_);
+    const double angle = 2.0 * M_PI * flip_turns_;
     flip_ = std::make_unique<FlipReference>(
-      q, flip_axis_, 2.0 * M_PI * flip_turns_, t + flip_delay_now_, flip_duration_);
+      q, flip_axis_, angle, t + flip_delay_now_, flip_duration_,
+      FlipReference::levelingCorrection(q, flip_axis_, angle), flip_level_duration_);
     roll_progress_ = 0.0;
     enter("RELEASE", t);
   }
@@ -571,12 +589,16 @@ private:
         }
       }
     } else if (state_ == "DRIVE_OFF") {
-      // From standstill, still upside down on the fan: accelerate forward and
-      // let go while the front axle is still under the overhang, so all four
-      // wheels leave together and the car flies on with this speed. The short
-      // overhang leaves too little run for the tyres alone, so the four rear
-      // nozzles supply the rest (Tesla's thrusters "launched it off the ramp");
-      // the wheels track the speed trajectory, the thrust is feed-forward.
+      // From standstill on the upper arc, on the fan: accelerate forward over
+      // the rest of the arc and up the ceiling, and let go while the front
+      // axle is still under it, so all four wheels leave together and the car
+      // flies on with this speed. Tesla's car drove off on its wheels; the
+      // fan's suction is the tyres' grip, and the speed trajectory asks for
+      // more than they can give (drive_off_speed over the run), so the drive
+      // runs at the traction-control limit all the way and the release speed
+      // is what the tyres reach (about 6 m/s). With drive_off_rear_thrust the
+      // four rear nozzles add the part of the trajectory's acceleration over
+      // drive_off_accel, as feed-forward.
       fan = 1.0;
       drive = true;
       if (drive_off_s0_ < 0.0) {
@@ -587,7 +609,7 @@ private:
       v_ref = std::min(drive_off_speed_, a_total * ts);
       a_ff = v_ref < drive_off_speed_ ? a_total : 0.0;
       const double a_thrust = std::max(a_total - drive_off_accel_, 0.0);
-      launch_u_ = v_ref < drive_off_speed_ && rear_f_max_ > 0 ?
+      launch_u_ = drive_off_rear_thrust_ && v_ref < drive_off_speed_ && rear_f_max_ > 0 ?
         std::clamp(mass_ * a_thrust / (rear_f_max_ * *feed_ratio_), 0.0, 1.0) : 0.0;
       if (s >= s_release_) {
         release_speed_ = speed_;
@@ -738,13 +760,17 @@ private:
       speed_int_ = std::clamp(speed_int_ + e * dt, -2.0, 2.0);
       const double f = mass_ * (a_ff + speed_kp_ * e + speed_ki_ * speed_int_ - g_along);
       // parking brake while standing (inverted hold, stopped): each wheel is
-      // damped against its own rotation. The speed loop alone gave ~5 N.m at
-      // a 2 cm/s creep, and the car stopped near the arc seam rolled back
-      // 3 cm through the hold (imu_shortstop1).
+      // damped against its own rotation, on top of its share of the gravity
+      // along the track. The speed loop alone gave ~5 N.m at a 2 cm/s creep,
+      // and the car stopped near the arc seam rolled back 3 cm through the
+      // hold (imu_shortstop1); the damper alone holds a slope only while
+      // creeping, 7 cm down the arc in 1 s at the 150 deg hold (tilt_imu1).
       const bool parked = state_ == "HOLD_INVERTED" || state_ == "STOPPED" || state_ == "READY";
+      const double tau_hold = -mass_ * g_along / 4.0 * wheel_radius_;
       for (std::size_t i = 0; i < 4; ++i) {
         const double cap = tc_k_ * tire_mu_ * std::max(wheelNormal(i), 0.0) * wheel_radius_;
-        const double tau = parked ? -park_brake_ * wheel_rate_[i] : f / 4.0 * wheel_radius_;
+        const double tau = parked ? tau_hold - park_brake_ * wheel_rate_[i] :
+          f / 4.0 * wheel_radius_;
         wheel_tau[i] = std::clamp(tau, -cap, cap);
       }
       // lateral: the ramp's width axis is world y; "left" flips with body y
@@ -856,7 +882,7 @@ private:
   double chassis_z_, landed_com_height_;
   double hold_time_;
   Vec3 flip_axis_;
-  double flip_turns_, flip_delay_, flip_duration_;
+  double flip_turns_, flip_delay_, flip_duration_, flip_level_duration_;
   AttitudeGains gains_;
   std::unique_ptr<LandingBrake> landing_;
   double landed_load_, landed_height_, mission_timeout_, start_delay_;
@@ -873,10 +899,10 @@ private:
   double lambda_;
   Vec6 w_flight_, w_brake_;
   std::unique_ptr<ThrustAllocator> alloc_;
-  double climb_speed_, accel_, stop_decel_, hold_x_, hold_kx_, hold_inverted_time_, stop_tol_;
+  double climb_speed_, accel_, stop_decel_, hold_arc_deg_, hold_kx_, hold_inverted_time_, stop_tol_;
   double drive_off_s0_ = -1.0;  // track position where the drive-off started
   double park_brake_;           // [N.m per rad/s of wheel rotation]
-  bool release_after_hold_;
+  bool release_after_hold_, drive_off_rear_thrust_;
   double drive_off_speed_, drive_off_accel_, drive_off_flip_delay_, release_margin_, wheelbase_;
   double release_speed_ = 0.0, rollout_v0_ = 0.0, flip_delay_now_ = 0.0;
   double arc_len_ = 0.0, s_hold_ = 0.0, s_release_ = 0.0;
@@ -888,6 +914,7 @@ private:
   double steer_k_lat_, steer_k_head_, steer_max_, fan_lead_;
   bool steer_enable_;
   double ramp_r_ = 0.0, ramp_cx_ = 0.0, ramp_cz_ = 0.0;
+  double oh_x0_ = 0.0, oh_z0_ = 0.0, oh_tx_ = -1.0, oh_tz_ = 0.0;  // ceiling start + direction
 
   std::optional<double> feed_ratio_;
   double tank_mass_ = 0.0;

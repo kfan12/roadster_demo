@@ -87,7 +87,7 @@ class StuntViz(Node):
         super().__init__('stunt_viz')
         world_json = self.declare_parameter('world_json', '').value
         nozzles_file = self.declare_parameter('nozzles_file', '').value
-        self.mass = self.declare_parameter('mass', 1800.0).value
+        self.mass = self.declare_parameter('mass', 1700.0).value  # stunt_params.yaml mass
         # arrow length per m g of force [m]
         self.arrow_per_mg = self.declare_parameter('arrow_per_mg', 1.2).value
         # HUD column (world frame): in the sky left of demo_a.rviz's side-on view
@@ -161,7 +161,14 @@ class StuntViz(Node):
             m.type = Marker.TRIANGLE_LIST
             m.scale.x = m.scale.y = m.scale.z = 1.0
             m.pose.orientation.w = 1.0
-            if s['type'] == 'plane':
+            if s['type'] == 'plane' and 'corners' in s:
+                # a slab drawn as its riding face (the ramp's tilted ceiling):
+                # corners in order round the quad, the first two along one edge
+                quad = [pt(*c) for c in s['corners']]
+                m.points = [quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]
+                m.color = rgba(*CONCRETE)
+                edges = [(quad[0], quad[1]), (quad[3], quad[2])]
+            elif s['type'] == 'plane':
                 n = s['normal']
                 if abs(n[2]) < 0.99 or s['name'] == 'ground':
                     continue  # the grid stands in for the ground; only flat slabs drawn

@@ -1,7 +1,7 @@
 # Roadster stunt simulation
 
 A ROS 2 (Humble) + Gazebo (Ignition Fortress) simulation of the three stunts from Tesla's 2026-10-15 Roadster unveil:
-- **Demo A, the inverted ramp:** the car drives up a curved ramp past vertical, held on by suction fans, stops upside down at the top and holds there, then drives off the overhang still upside down, kick-flips 180 degrees in the air on cold-gas thrusters, brakes its fall with them, and lands on its wheels.
+- **Demo A, the inverted ramp:** the car drives up a curved ramp past vertical, held on by suction fans, stops on the upper arc mostly upside down and holds there, then drives on its tyres alone up onto a ceiling that tilts slightly upward and off its end, kick-flips 180 degrees in the air on cold-gas thrusters, falls freely, brakes hard on them just before the ground, and lands on its wheels.
 - **Demo B, the obstacle hop:** at 15 m/s the car lifts off on its thrusters, flies over a row of parked vehicles (Model 3, Model Y, Semi, Cybertruck, Cybercab; the Semi is 4.1 m tall) doing a full 360 degree roll on the way, and lands upright past them.
 - **Demo C, the straight launch:** 0-60 mph in about 0.81 s on the tyres plus the rear thrusters.
 
@@ -10,9 +10,9 @@ The car model was derived from the sedan in [kfan12/vlm_av_ws](https://github.co
 
 Demo A, the inverted ramp:
 
-https://github.com/user-attachments/assets/888b4427-4ba5-426a-9185-c3fbf24d8e91
+https://github.com/user-attachments/assets/1c496b1a-adc0-415a-a791-6ab80cee910f
 
-| Drive-off, upside down (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
+| Drive-off on the tyres, fan on (trackside camera) | Kick flip in flight | Landing burn | Mid-flip (onboard camera) |
 | --- | --- | --- | --- |
 | ![Drive-off](docs/snapshots/roadster_driveoff_trackside.png) | ![Flip](docs/snapshots/roadster_flip_trackside.png) | ![Landing](docs/snapshots/roadster_landing_trackside.png) | ![Onboard](docs/snapshots/roadster_flip_onboard.png) |
 
@@ -34,10 +34,10 @@ Demo C, the straight launch:
 
 1. **Run-in:** accelerate to 6 m/s; the suction fans spin up about 6 m before the ramp.
 2. **Climb:** round an 8 m radius loop at 6 m/s, pressed onto the track by the fans.
-3. **Stop and hold:** brake on the upper arc and stop just past the top, upside down on a 5 m overhang, and stand still for 1 s on fan suction alone (parking brake on the wheels).
-4. **Drive-off:** from standstill, still upside down, accelerate forward with the wheels plus the four rear thrusters and let go of the overhang at about 7 m/s.
-5. **Kick flip:** roll 180 degrees about the car's long axis in about 0.8 s while flying forward.
-6. **Landing burn:** fire the bottom thrusters at 1.5 g, then flare harder (2 g) over the last metre to touch down gently at about 0.6 m/s, then roll out and stop.
+3. **Stop and hold:** brake on the upper arc and stop at 150 degrees round the loop, 30 degrees short of upside down, and stand still for 1 s on fan suction alone (parking brake on the wheels, holding against gravity along the track).
+4. **Drive-off:** from standstill, accelerate on the tyres alone (no thrusters; the fan's suction is their grip) over the rest of the arc and up the 6 m ceiling, which rises 10 degrees away from the loop, and let go near its end at about 6.4 m/s.
+5. **Kick flip:** 0.25 s after letting go, roll 180 degrees about the car's long axis in 0.65 s, then level the 10 degree nose-up pitch the ceiling left in 0.4 s.
+6. **Free fall, then landing burn:** fall freely to about 3.3 m (13 m/s), then fire the bottom thrusters at up to 4.5 times the car's weight: a violent 3.5 g stop in 0.4 s, then a steady 0.3 s settle onto the wheels at about 0.7 m/s, then roll out and stop.
 
 ## Sequence (Demo B: the obstacle hop)
 
@@ -47,7 +47,7 @@ Demo C, the straight launch:
 4. **Flip over the row:** a 360 degree roll about the car's long axis in 1.6 s, at 15 m/s, about 1 m above the Semi's roof (the Semi, the tallest vehicle, stands in the middle of the row).
    The roll comes from one side's bottom pair at a time, and its torque peaks while the car is nearly upright, so the roll also lifts: the lift burn is planned short to leave room for it.
    The two halves' sideways pushes cancel, so the car swings out about 4 m/s mid-roll and back without the side nozzles; braking that swing, and nulling the roll's lift, had cost a third of the flip's gas.
-5. **Landing burn:** the same two-stage profile and flare as Demo A, then roll out and stop.
+5. **Landing burn:** the same hard stop and settle as Demo A, then roll out and stop.
 
 The hop plan (`roadster_control/hop_planner.hpp`) is computed at startup from the vehicles in the world's map.
 It flies the plan: it integrates the climb (burn, then the roll's own thrust, then gravity) with the roll angle, finds the burn start that keeps the car's lowest point (any corner of the rolled car, down to 1.3 m under its centre of mass) the clearance above every vehicle while over it, and bisects for the shortest burn that does.
@@ -62,10 +62,10 @@ It also checks that the roll ends before the landing burn, and that its impulse 
 ## Hardware enablers (as modelled)
 
 - **Cold-gas thrusters:** 10 nozzles fed from a 600 L carbon-overwrapped tank at 400 bar (about 250 kg of air), regulated to 100 bar at the nozzles, with first-order valve lag (20 ms) and a minimum on-time.
-  Four rear nozzles facing backward (4 x 1.125 m g, the launch), four bottom corner nozzles pushing up (4 x 1.1 m g, lift, landing and the flip's roll torque) and two side nozzles, one exhausting to each side (2 x 0.5 m g, at the centre of mass so they push sideways without any torque).
+  Four rear nozzles facing backward (4 x 1.125 m g, the launch), four bottom corner nozzles pushing up (4 x 1.4 m g, lift, landing and the flip's roll torque) and two side nozzles, one exhausting to each side (2 x 0.5 m g, at the centre of mass so they push sideways without any torque).
   With no nozzle pushing toward the floor there is no force-free roll couple: the kick flip rolls on one side's bottom pair, whose push sweeps through the horizontal as the car turns and would carry it about 5 m sideways, landing with 4 m/s of sideways speed.
   The side nozzles cancel that drift, during the flip and in the descent after it: the car touches down about 0.4 m off the centreline with under 0.1 m/s of sideways speed, inside a 12 m wide landing zone.
-  The tank depletes with use, so gas is the binding budget: below about 68 kg the tank drops out of regulation and every nozzle weakens, so about 182 kg is usable; Demo A uses about 195 kg (the end of its landing burn runs at 83% feed), Demo B about 172 kg, Demo C about 110 kg.
+  The tank depletes with use, so gas is the binding budget: below about 68 kg the tank drops out of regulation and every nozzle weakens, so about 182 kg is usable; at the 1,700 kg model mass Demo A uses about 176 kg, Demo B about 170 kg, Demo C about 101 kg.
 - **Suction fans:** up to 1.5 m g of downforce along the body's floor normal, with spin-up lag, an immediate cut-off (at release the car is in a 1 g fall at once) and a ground-effect falloff with the gap to the track (computed from the track's analytic geometry), enough to hold the car upside down at standstill.
   This is a lumped force; the physical mechanism (a pressure drop under a skirted floor, set by the fan curve and the skirt leakage) is not modelled yet.
 - **Suspension:** a preloaded spring-damper per corner (250 kN/m, damping ratio 0.5, plus or minus 12 cm), sized for the 4-5 g load at the bottom of the loop.
@@ -79,12 +79,12 @@ All stunt forces (tank, nozzles, fan, suspension springs) come from a single Gaz
 
 - **Mission state machine** (`roadster_control/stunt_mission_node`), one mode per demo: run-in, climb, stop, inverted hold, drive-off, release, flip, descent (ramp); ready, approach, lift burn, ballistic (hop); ready, launch (launch); then landing brake, landed, rollout and stopped, with an abort path.
 - **Ground phase:** a speed PI with gravity feed-forward along the track and per-wheel traction control (wheel torque capped at k mu N r from the measured wheel load).
-  Progress is measured as distance along the whole track (run-in, arc, overhang), the stop onto the hold point is a planned constant-deceleration trajectory, and while standing the wheels are held by a parking brake.
+  Progress is measured as distance along the whole track (run-in, arc, ceiling), the stop onto the hold point is a planned constant-deceleration trajectory, and while standing the wheels are held by a parking brake (gravity feed-forward plus damping).
   Steering is held straight: the track is straight in one vertical plane, so with no disturbance there is nothing to correct.
-- **Flight phase:** a quaternion attitude controller (PD on the rotation-vector error with reference rate and acceleration feed-forward and gyroscopic compensation) tracks a minimum-jerk roll: 180 degrees off the ramp, 360 over the hop row.
+- **Flight phase:** a quaternion attitude controller (PD on the rotation-vector error with reference rate and acceleration feed-forward and gyroscopic compensation) tracks a minimum-jerk roll: 180 degrees off the ramp (then a separate levelling of the pitch the tilted ceiling left), 360 over the hop row.
   A thrust allocator solves a small QP with OSQP for the 10 valve openings (bounded to [0, 1], since a nozzle can only push), weighting forces in world axes (lift up, braking any sideways velocity whatever the attitude) and torques in body axes.
-- **Landing:** a two-stage constant-deceleration velocity profile (1.5 g, then a 2 g flare below 1 m) latches on once the car falls faster than it, with the deceleration feed-forward only while descending.
-  The burn latches and the flare starts 40 ms early to cover the nozzles' thrust rise, the flare has stiffer feedback and ends early by the nozzles' thrust fall, and the last 8 cm are a constant 0.7 m/s descent, so a few centimetres of height-estimate drift change where the wheels touch, not how fast: the car arrives at about 0.4-0.6 m/s without hovering.
+- **Landing:** a constant-deceleration velocity profile (3.6 g, with stiff 10 /s feedback, since profile errors grow as a / v_ref) latches on once the car falls faster than it, with the deceleration feed-forward only while descending.
+  The burn latches 40 ms early to cover the nozzles' thrust rise, its feed-forward ends early by the nozzles' thrust fall, and the last 30 cm are a steady 0.75 m/s settle, a visible ~0.45 s hover after the hard stop, so a few centimetres of height-estimate drift change where the wheels touch, not how fast: the car arrives at about 0.74 m/s.
   Touchdown is detected from wheel contact, with a height backup only below the standing height.
 - **State estimation** (`roadster_control/state_estimator_node`): an IMU strapdown integration in a 15-state error-state EKF (position, velocity, attitude, accelerometer and gyro biases).
   It is corrected only by what the car can sense itself: wheel speed (encoders plus gyro pitch rate) with no side-slip and no hop, each loaded wheel centre one radius from the known track surface, and zero-velocity, gravity and zero-rate updates when standing still.
@@ -150,7 +150,7 @@ The stunt worlds are generated into `src/roadster_description/worlds/`, with the
 Rebuild after generating, so the new files are installed:
 
 ```bash
-python3 scripts/generate_stunt_world.py --kind ramp --radius 8              # roadster_ramp (5 m overhang)
+python3 scripts/generate_stunt_world.py --kind ramp --radius 8              # roadster_ramp (6 m ceiling, 10 deg up)
 python3 scripts/generate_stunt_world.py --kind ceiling --height 16 --out roadster_drop16
 python3 scripts/generate_stunt_world.py --kind hop                          # roadster_hop (the parked row)
 python3 scripts/generate_stunt_world.py --kind launch                       # roadster_launch (straight runway)
@@ -172,12 +172,12 @@ All runs IMU-flown (`state:=imu`), scored by `tools/avkit/analyze_stunt_run.py`,
 
 | | Demo A, inverted ramp | Demo B, obstacle hop | Demo C, straight launch |
 | --- | --- | --- | --- |
-| Stunt | hold upside down 1.0 s, release at 7.2 m/s, 180 degree flip | 360 degree flip over the row, 1.02-1.12 m over the Semi, 2.9-3.4 m over the rest | 0-60 mph in 0.810 s over 10.7 m, rear thrust within 2.2% of its command, no yaw |
-| Touchdown | 0.53 m/s, 1.88 g peak, 0.4 m off centre | 0.40-0.51 m/s, 1.89 g peak, 1.0 m off centre | - |
-| Gas | 195 kg | 171-173 kg | 110 kg (37 kN.s, plan estimate 32) |
+| Stunt | hold on the upper arc 1.0 s, release at 6.4 m/s on the tyres alone, 180 degree flip in 0.65 s | 360 degree flip over the row, 1.04 m over the Semi, 2.9-3.4 m over the rest | 0-60 mph in 0.810 s over 10.7 m, rear thrust within 2.2% of its command, no yaw |
+| Touchdown | 0.74 m/s after a 0.5 s hover at 0.33 m, 2.1 g peak, 0.82 m off centre | 0.75 m/s, 3.3 g peak, 0.97 m off centre | - |
+| Gas | 176 kg | 170 kg | 101 kg (36 kN.s, plan estimate 32) |
 
 The tank leaves regulation (below 100 bar at the nozzles, so every nozzle weakens) at about 68 kg, so the usable budget is about 182 kg.
-Demo B fits it; Demo A does not quite, and the end of its landing burn runs at 83% feed pressure: it still lands at 0.5 m/s, but with no margin, and gas is the binding limit.
+Both flying demos fit it: Demo A ends about 6 kg above the regulation limit and Demo B about 13 kg, so gas is still the binding limit.
 The simulation is deterministic apart from sensor noise, so repeated runs show repeatability, not margin; robustness testing (noise, wind, parameter sweeps) is still to come.
 
 ## Packages

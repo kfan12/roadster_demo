@@ -12,14 +12,14 @@ first camera frame stamped at or after it (sim time) as a PNG, then exits
 once all are saved (or after --timeout wall seconds):
 
   ramp (Demo A)
-  roadster_driveoff_trackside.png  DRIVE_OFF + 0.3 s: upside down, rear thrust on
+  roadster_driveoff_trackside.png  DRIVE_OFF + 0.3 s: on the upper arc, tyres and fan only
   roadster_flip_trackside.png      FLIP + 0.3 s: on its side mid-flip
-  roadster_landing_trackside.png   LAND_BRAKE, height <= 1.0 m: the flare
+  roadster_landing_trackside.png   LAND_BRAKE, height <= 1.0 m: the hard stop
   roadster_flip_onboard.png        FLIP + 0.3 s, the car's front camera
   hop (Demo B)
   roadster_hop_liftoff_trackside.png  HOP_BURN + 0.25 s: the lift burn
   roadster_hop_flip_trackside.png     BALLISTIC + 0.8 s: upside down mid-roll, over the Semi
-  roadster_hop_landing_trackside.png  LAND_BRAKE, height <= 1.0 m: the flare
+  roadster_hop_landing_trackside.png  LAND_BRAKE, height <= 1.0 m: the hard stop
   roadster_hop_flip_onboard.png       BALLISTIC + 0.8 s, the car's front camera
   launch (Demo C)
   roadster_launch_start_trackside.png  LAUNCH + 0.4 s: rear thrust on

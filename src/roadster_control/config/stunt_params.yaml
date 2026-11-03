@@ -5,9 +5,9 @@ stunt_mission_node:
     # rigid body, from the expanded roadster URDF (rigid_body() in
     # tools/avkit/roadster_actuation_test.py prints these): total mass, COM in
     # the chassis frame, inertia about the COM
-    mass: 1800.01
-    com_chassis: [0.0075, 0.0, 0.0]
-    inertia_diag: [597.9, 3123.4, 3582.4]   # with the suspension links (2026-10-16)
+    mass: 1700.01                # the published target curb weight (1,800 before, 2026-11-03)
+    com_chassis: [0.0079, 0.0, 0.0]
+    inertia_diag: [566.8, 2950.6, 3386.7]   # with the suspension links, at 1,700 kg
     chassis_offset_z: 0.33       # chassis frame above base_link (wheel radius)
     landed_com_height: 0.33      # COM height when standing on the ground
 
@@ -16,22 +16,35 @@ stunt_mission_node:
     flip_axis: [1.0, 0.0, 0.0]   # body roll = "kick flip"
     flip_turns: 0.5
     flip_delay: 0.4              # fall clear of the ceiling first (~1 m) [s]
-    flip_duration: 0.8           # [s]
+    flip_duration: 0.65          # [s]: a quick kick flip, as Tesla's; the minimum-jerk peak (43 rad/s^2,
+                                 # 26 kN.m) is 88% of one bottom pair's roll torque (0.8 s before)
+    flip_level_duration: 0.4     # [s] then level the pitch the roll kept (the ceiling's 10 deg tilt),
+                                 # on its own: blended into the roll it needs body yaw torque
     att_kp: [36.0, 36.0, 36.0]   # 6 rad/s natural frequency
     att_kd: [10.8, 10.8, 10.8]   # zeta 0.9
 
-    brake_accel: 14.7            # 1.5 g constant-deceleration profile ...
-    flare_height: 1.0            # ... down to this COM height above standing [m], then
-    flare_accel: 19.6            # a 2 g flare (3 m g of the ~4 m g lift: 1 m g left to correct with) ...
-    touchdown_speed: 0.7         # ... to this at touchdown_height, then held to the ground [m/s]
-    touchdown_height: 0.08       # COM above standing [m]. The hanging wheels touch at ~0.02, and
-                                 # the IMU-only height drifts +-3 cm over a 2.7 s flight: with 0.05
-                                 # and a profile still falling through it, a 3 cm high estimate
-                                 # touched down at 1.1 m/s (final_hop_imu4); this holds a
-                                 # constant-speed segment across the whole error band
-    thrust_fall_time: 0.02       # nozzle valve fall lag (xacro tau_fall_s): the flare ends this early
-    brake_kv: 3.0
-    flare_kv: 10.0               # [1/s] stiffer in the flare, where errors grow fast
+    brake_accel: 35.3            # a violent 3.6 g constant-deceleration profile after a long free fall,
+                                 # as Tesla's landing burn: 4.6 m g of the 5.04 m g usable bottom thrust,
+                                 # 0.44 m g left to correct with (2.5 g on 4 x 1.1 m g nozzles before;
+                                 # 1.5 g before that), in one stage (no separate flare) ...
+    flare_height: 0.0            # (no flare stage: flare_accel only covers the lead-time window)
+    flare_accel: 35.3
+    touchdown_speed: 0.75        # ... to this speed at touchdown_height, then a steady descent at it,
+                                 # the car settling onto its wheels after the hard stop [m/s]
+    touchdown_height: 0.30       # COM above standing [m]: the steady settle, ~0.4 s, a visible
+                                 # hover after the hard stop (0.12 m, 0.3 s, before: barely seen;
+                                 # an owner decision, 2026-11-03). It hovers on ~1 m g, ~50 kg/s
+                                 # of gas, so the tank grew 0.6 -> 0.66 m^3 to pay for it (at
+                                 # 0.6 m^3, 0.45 s of settle took the tank out of regulation,
+                                 # land_imu1, and 0.38 s to 98% feed, land_imu3).
+                                 # At least 0.08: the hanging wheels touch at ~0.02, and the IMU-only
+                                 # height drifts +-3 cm over a 2.7 s flight (a profile still falling
+                                 # through the error band touched down at 1.1 m/s, final_hop_imu4)
+    thrust_fall_time: 0.02       # nozzle valve fall lag (xacro tau_fall_s): the burn ends this early
+    brake_kv: 10.0               # [1/s]: profile errors grow at a / v_ref, so a 3.6 g stage needs the
+                                 # stiff gain; at 3 the car ran 0.7 m/s under the profile, stopped
+                                 # early, fell and touched at 0.79 m/s (land_imu2)
+    flare_kv: 10.0               # [1/s]
     flare_lead_time: 0.04        # start the flare thrust this early: the nozzles take ~40 ms to rise
     lateral_kv: 2.0              # [1/s] flight: world-y force demand = -m kv vy (brakes the flip's drift)
     landed_load: 0.1             # touchdown: wheel contact > this x m g while upright (F/T)
@@ -45,19 +58,26 @@ stunt_mission_node:
     climb_speed: 6.0             # constant speed round the arc [m/s]
     accel: 2.0                   # run-in acceleration [m/s^2]
     stop_decel: 3.0              # braking to the hold point [m/s^2], measured along the track:
-                                 # from 6 m/s it starts ~6 m before hold_x, on the upper arc
-    hold_x: -1.5                 # stop just past the top: both axles on the 5 m overhang
+                                 # from 6 m/s it starts ~6 m before it
+    hold_arc_deg: 150.0          # stop on the upper arc, 30 deg short of upside down (angle from the
+                                 # arc's bottom): the tyres then get ~2.6 m of arc plus the ceiling to
+                                 # reach speed. The park brake there needs 0.81 of the 0.96 m g of grip
+                                 # traction control allows (0.63 m g normal load)
     hold_kx: 1.0                 # [1/s] position loop round the stop trajectory (the hold stands still)
     hold_inverted_time: 1.0      # standing still upside down at the top [s] (plan Phase 4 used 2)
-    stop_tolerance: 0.15         # stopped within this of hold_x counts as stopped [m]
+    stop_tolerance: 0.15         # stopped within this of the hold point counts as stopped [m]
     park_brake: 3000.0           # wheel damping while standing [N.m per rad/s]
     release_after_hold: true     # false: stay held (Phase 4 test), true: drive off, flip, land
-    # drive-off: from the stationary inverted hold, accelerate forward (still on
-    # the fan) and fly off the overhang's end with this speed. The short overhang
-    # leaves ~1.7 m of run-up, so the rear nozzles add what the tyres cannot.
-    drive_off_speed: 7.0         # [m/s]; 8 left too little gas in regulation for the landing
-    drive_off_accel: 2.5         # [m/s^2] the tyres are counted on for; thrust adds the rest
-    drive_off_flip_delay: 0.6    # fall + travel clear of the overhang edge before rolling [s]
+    # drive-off: from the hold on the arc, accelerate forward on the tyres alone
+    # (still on the fan) over the rest of the arc and up the tilted ceiling, and
+    # fly off its end, as Tesla's car did. The speed trajectory (drive_off_speed
+    # over the run) asks for more than the tyres can give, so they run at the
+    # traction-control limit and the car lets go at what they reach (~6 m/s).
+    drive_off_speed: 8.0         # [m/s] trajectory target (above what the tyres reach)
+    drive_off_rear_thrust: false # true: the four rear nozzles add what the tyres cannot
+    drive_off_accel: 2.5         # [m/s^2] with rear thrust: the tyres' share; thrust adds the rest
+    drive_off_flip_delay: 0.25   # fall clear of the ceiling (0.3 m in 0.25 s; the slow start of the
+                                 # roll needs ~0.6 m by 0.45 s) before rolling [s]
     release_margin: 0.5          # let go with the front axle this far short of the edge [m]
     wheelbase: 2.7               # must match roadster.urdf.xacro
     speed_kp: 2.0                # [1/s], drive force = m (kp e + ki int e) + gravity ff
@@ -83,7 +103,7 @@ stunt_mission_node:
     # (hop_planner.hpp), approach on the wheels, lift burn, ballistic arc, landing
     hop_speed: 15.0              # approach and flight speed [m/s]
     hop_accel: 4.0               # approach acceleration on the tyres [m/s^2]
-    hop_burn_accel: 24.5         # lift burn net upward acceleration (3.5 m g of the ~4 m g) [m/s^2]:
+    hop_burn_accel: 24.5         # lift burn net upward acceleration (3.5 m g of the ~5 m g) [m/s^2]:
                                  # a harder, shorter burn loses less to gravity; with the flip
                                  # 1.5 g planned 59.2 kN.s, over the 57.3 allowed (hop_sweep)
     hop_clearance: 1.15          # planned, over every vehicle [m]: the plan target is 1.0 (minimum

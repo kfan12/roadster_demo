@@ -1,6 +1,6 @@
 {
   "world": "roadster_ramp",
-  "generator": "generate_stunt_world.py --kind ramp --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 180.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 5.0 --run-in 25.0 --landing-width 12.0 --landing-x -45.0 -12.0 --runway-len 120.0 --hop-gap 0.5 --landing-len 45.0",
+  "generator": "generate_stunt_world.py --kind ramp --width 5.0 --thickness 0.4 --mu 1.5 --height 6.0 --slab-len 20.0 --radius 8.0 --arc-deg 170.0 --seg-deg 3.0 --overlap 0.02 --overhang-len 6.0 --run-in 25.0 --landing-width 12.0 --landing-x -45.0 -12.0 --runway-len 120.0 --hop-gap 0.5 --landing-len 45.0",
   "spawn": {
     "x": -25.0,
     "y": 0.0,
@@ -12,10 +12,10 @@
   "geometry": {
     "kind": "ramp",
     "radius": 8.0,
-    "arc_deg": 180.0,
+    "arc_deg": 170.0,
     "width": 5.0,
     "thickness": 0.4,
-    "overhang_len": 5.0,
+    "overhang_len": 6.0,
     "run_in": 25.0,
     "arc_center_xz": [
       0.0,
@@ -23,14 +23,23 @@
     ],
     "arc_theta": [
       -1.5707963267948966,
-      1.5707963267948966
+      1.3962634015954638
+    ],
+    "ceiling_tilt_deg": 10.0,
+    "overhang_start_xz": [
+      1.389185,
+      15.878462
+    ],
+    "overhang_end_xz": [
+      -4.519661,
+      16.920351
     ],
     "landing_width": 12.0,
     "landing_x": [
       -45.0,
       -12.0
     ],
-    "drop_height": 16.0
+    "drop_height": 16.920351
   },
   "surfaces": [
     {
@@ -66,7 +75,7 @@
       ],
       "radius": 8.0,
       "theta0": -1.5707963267948966,
-      "theta1": 1.5707963267948966,
+      "theta1": 1.3962634015954638,
       "y_range": [
         -2.5,
         2.5
@@ -76,24 +85,46 @@
       "type": "plane",
       "name": "overhang",
       "point": [
-        0,
-        0,
-        16.0
+        1.389185,
+        0.0,
+        15.878462
       ],
       "normal": [
-        0,
-        0,
-        -1
+        -0.173648178,
+        0.0,
+        -0.984807753
       ],
       "box_min": [
-        -5.5,
+        -5.019661,
         -2.5,
         8.0
       ],
       "box_max": [
-        0.5,
+        1.889185,
         2.5,
-        16.5
+        17.420351
+      ],
+      "corners": [
+        [
+          1.389185,
+          -2.5,
+          15.878462
+        ],
+        [
+          -4.519661,
+          -2.5,
+          16.920351
+        ],
+        [
+          -4.519661,
+          2.5,
+          16.920351
+        ],
+        [
+          1.389185,
+          2.5,
+          15.878462
+        ]
       ]
     }
   ]

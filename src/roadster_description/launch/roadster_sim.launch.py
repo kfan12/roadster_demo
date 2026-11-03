@@ -155,7 +155,9 @@ def generate_launch_description():
         # sits at ground level, same as the sedan) 5 cm above the origin
         *[DeclareLaunchArgument(k, default_value='auto')
           for k in ('x', 'y', 'z', 'roll', 'pitch', 'yaw')],
-        DeclareLaunchArgument('chassis_mass', default_value='1730'),
+        # + 110 kg of wheels and links = 1,700 kg; keep equal to the xacro default
+        # (a stale 1730 here once flew a 1,840 kg car against an 1,800 kg controller)
+        DeclareLaunchArgument('chassis_mass', default_value='1590'),
         DeclareLaunchArgument('tire_mu', default_value='1.2'),
         DeclareLaunchArgument('with_camera', default_value='false'),
         DeclareLaunchArgument('fan_initial_speed', default_value='0.0',

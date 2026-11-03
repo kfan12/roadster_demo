@@ -10,7 +10,8 @@ contacts after release, impulse and gas used, state timeline, and the
 touchdown's lateral speed and offset (inside the map's landing zone when
 --map names a world JSON with a geometry.landing_width). Ramp runs
 (timeline starts with ACCELERATE) are also scored on the ground phase: arc
-progress, inverted hold time / stillness / wheel loads, lateral offset and
+progress onto the ceiling, hold time / stillness / attitude / wheel loads
+(the hold is on the upper arc, short of fully inverted), lateral offset and
 body contacts on the ramp; flight checks apply only when the car released.
 The demo is told by its states: CLIMB = ramp (Demo A), HOLD = drop, LAUNCH =
 Demo C (0-60 mph time, rear thrust tracking, impulse, yaw), APPROACH = Demo B
@@ -185,18 +186,26 @@ def main():
         ho = [o for o in odom if held and max(held[0]['t'], held[-1]['t'] - args.min_hold)
               <= o['t'] <= held[-1]['t']]
         if ho:
-            p0 = ho[0]['p']
+            p0, q0 = ho[0]['p'], ho[0]['q']
             m['hold_drift_m'] = max(math.dist(o['p'], p0) for o in ho)
             m['hold_xyz'] = p0
-            m['hold_inverted_cos'] = min(-body_z(o['q'])[2] for o in ho)
+            # the hold is on the upper arc, short of fully inverted: report how
+            # far from upside down, and score that the attitude stays put
+            m['hold_from_inverted_deg'] = math.degrees(math.acos(
+                max(-1.0, min(1.0, -body_z(q0)[2]))))
+            m['hold_attitude_change_deg'] = max(math.degrees(2 * math.acos(min(1.0, abs(
+                sum(a * b for a, b in zip(o['q'], q0)))))) for o in ho)
         ground_contacts = [c for c in contacts if c['t'] < t_end_ground]
         m['body_contacts_on_ramp'] = len(ground_contacts)
         m['body_contact_on_ramp_with'] = sorted({w for c in ground_contacts for w in c['with']})
+        # the ceiling starts where the arc ends (arc_deg; 180 = a flat one)
+        arc_end = geometry.get('arc_deg', 180.0)
         checks.update({
-            'reached fully inverted': m['max_arc_angle_deg'] >= 179.0,
-            f'held inverted >= {args.min_hold:.1f} s': m['inverted_hold_s'] >= args.min_hold,
-            'stayed upside down while held': m.get('hold_inverted_cos', 0) > math.cos(
-                math.radians(5)),
+            f'reached the ceiling (arc {arc_end:.0f} deg)': m['max_arc_angle_deg'] >= arc_end - 1.0,
+            f'held >= {args.min_hold:.1f} s': m['inverted_hold_s'] >= args.min_hold,
+            'held upside down (> 90 deg from upright), attitude steady (< 1 deg)':
+                m.get('hold_from_inverted_deg', 180) < 90.0 and
+                m.get('hold_attitude_change_deg', 1e9) < 1.0,
             'held still (< 2 cm)': m.get('hold_drift_m', 1e9) < 0.02,
             'wheels loaded while held': (m['min_wheel_normal_held_N'] or 0) > args.min_normal,
             'all wheels on the track (run-in to drive-off)':
@@ -374,7 +383,8 @@ def main():
     print('timeline: ' + '  '.join(f'{t:.2f} {st}' for t, st in timeline))
     for k in ('max_arc_angle_deg', 'max_climb_speed', 'max_lateral_offset_m',
               'min_wheel_normal_on_ramp_N', 'min_wheel_normal_held_N', 'inverted_hold_s',
-              'hold_drift_m', 'hold_xyz', 'body_contacts_on_ramp', 'body_contact_on_ramp_with',
+              'hold_drift_m', 'hold_xyz', 'hold_from_inverted_deg', 'hold_attitude_change_deg',
+              'body_contacts_on_ramp', 'body_contact_on_ramp_with',
               'release_speed', 'release_xyz', 'flight_distance_m', 'touchdown_forward_speed',
               'rollout_m', 'stop_xy',
               'zero_to_60_s', 'distance_to_60_m', 'top_speed', 'launch_thrust_kN',

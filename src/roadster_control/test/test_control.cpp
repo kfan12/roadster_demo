@@ -63,6 +63,40 @@ TEST(Flip, HalfTurnFromInvertedEndsUpright)
   EXPECT_NEAR(mid.alpha.norm(), 0.0, 1e-9);
 }
 
+TEST(Flip, HalfTurnOffATiltedCeilingEndsLevel)
+{
+  // inverted, heading -x, nose 10 deg up: as the car leaves the tilted ceiling
+  const double tilt = 10.0 * M_PI / 180.0;
+  const Quat q0 = Quat(Eigen::AngleAxisd(M_PI, Vec3::UnitZ())) *
+    Quat(Eigen::AngleAxisd(-tilt, Vec3::UnitY())) * Quat(Eigen::AngleAxisd(M_PI, Vec3::UnitX()));
+  ASSERT_NEAR(q0.toRotationMatrix().col(2).z(), -std::cos(tilt), 1e-12);  // upside down
+  ASSERT_NEAR(q0.toRotationMatrix().col(0).z(), std::sin(tilt), 1e-12);   // nose up
+  const Vec3 c = FlipReference::levelingCorrection(q0, Vec3::UnitX(), M_PI);
+  EXPECT_NEAR(c.norm(), tilt, 1e-9);
+  FlipReference f(q0, Vec3::UnitX(), M_PI, 0.0, 0.65, c, 0.4);
+  EXPECT_NEAR(f.rollEndTime(), 0.65, 1e-12);
+  EXPECT_NEAR(f.endTime(), 1.05, 1e-12);
+  const Mat3 R_end = f.at(1.2).q.toRotationMatrix();
+  EXPECT_NEAR(R_end.col(2).z(), 1.0, 1e-9);           // upright and level
+  EXPECT_NEAR(R_end.col(0).x(), -1.0, 1e-9);          // heading kept
+  // the roll keeps the pitch: nose up by the tilt when it ends
+  EXPECT_NEAR(f.at(0.65).q.toRotationMatrix().col(0).z(), std::sin(tilt), 1e-9);
+  // no yaw demanded in either part (the roll, then the levelling)
+  for (double t : {0.2, 0.4, 0.8, 0.9}) {
+    EXPECT_NEAR(f.at(t).w.z(), 0.0, 1e-9) << t;
+  }
+  // the reference's rate and acceleration are its attitude's derivatives
+  for (double t : {0.1, 0.3, 0.5, 0.75, 0.9}) {
+    const double h = 1e-5;
+    const auto a = f.at(t - h), b = f.at(t), d = f.at(t + h);
+    EXPECT_LT((attitudeError(a.q, d.q) / (2 * h) - b.w).norm(), 1e-5) << t;
+    EXPECT_LT(((d.w - a.w) / (2 * h) - b.alpha).norm(), 1e-3) << t;
+  }
+  // no correction for a flip that starts level
+  const Quat inverted(Eigen::AngleAxisd(M_PI, Vec3::UnitX()));
+  EXPECT_LT(FlipReference::levelingCorrection(inverted, Vec3::UnitX(), M_PI).norm(), 1e-9);
+}
+
 TEST(Landing, FreeFallThenLatchedBrake)
 {
   LandingBrake b{LandingParams{}};
@@ -137,6 +171,38 @@ TEST(Landing, ReachesTouchdownSpeedAtTouchdownHeightAndHoldsIt)
   EXPECT_NEAR(b.upForce(0.03, -0.5, 1800, 1e6), 1800 * 9.81, 1e-6);
 }
 
+TEST(Landing, HardStopThenSteadySettle)
+{
+  // Demo A's landing: one 3.6 g stage down to h_td, then a steady descent at
+  // v_td onto the wheels (stunt_params.yaml)
+  LandingParams p;
+  p.brake_accel = 35.3;
+  p.flare_accel = 35.3;
+  p.flare_height = 0.0;
+  p.touchdown_speed = 0.75;
+  p.touchdown_height = 0.30;
+  p.k_v = 10.0;
+  p.flare_kv = 10.0;
+  p.flare_lead_time = 0.04;
+  p.thrust_fall_time = 0.02;
+  LandingBrake b{p};
+  for (double h : {0.0, 0.15, 0.30}) {
+    EXPECT_NEAR(b.profileSpeed(h), 0.75, 1e-12) << h;  // steady through the settle
+  }
+  EXPECT_NEAR(b.profileSpeed(3.30), std::sqrt(0.5625 + 2 * 35.3 * 3.0), 1e-9);
+  EXPECT_GT(b.upForce(5.0, -25.0, 1800, 1e6), 0.0);  // latch (the profile allows 18.4 m/s at 5 m)
+  // on the hard stage: weight plus the 3.6 g deceleration
+  EXPECT_NEAR(b.upForce(2.30, -b.profileSpeed(2.30), 1800, 1e6), 1800 * (9.81 + 35.3), 1e-6);
+  // near its end the deceleration feed-forward stops by the valves' fall lag
+  // (v_td / 2 + a t_fall = 1.081 m/s): the decaying thrust sheds the rest
+  const double h1 = 0.30 + (1.0 * 1.0 - 0.5625) / (2 * 35.3);
+  EXPECT_NEAR(b.upForce(h1, -1.0, 1800, 1e6), 1800 * 9.81, 1e-6);
+  // in the settle, on the profile: the weight alone (a hover at 0.75 m/s down)
+  EXPECT_NEAR(b.upForce(0.15, -0.75, 1800, 1e6), 1800 * 9.81, 1e-6);
+  // 0.25 m/s too fast in the settle: the stiff feedback
+  EXPECT_NEAR(b.upForce(0.15, -1.0, 1800, 1e6), 1800 * (9.81 + 10.0 * 0.25), 1e-6);
+}
+
 TEST(Landing, FlareEndsEarlyByTheThrustFallLag)
 {
   LandingParams p;
@@ -162,8 +228,8 @@ std::vector<NozzleGeom> roadsterNozzles(double mg)
   // same layout as roadster_description/config/nozzles.yaml (COM at origin)
   struct N {const char * n; double x, y, z, dx, dy, dz, k;};
   const N tab[] = {
-    {"down_front_left", 1.9, 0.75, 0, 0, 0, 1, 1.1}, {"down_front_right", 1.9, -0.75, 0, 0, 0, 1, 1.1},
-    {"down_rear_left", -1.9, 0.75, 0, 0, 0, 1, 1.1}, {"down_rear_right", -1.9, -0.75, 0, 0, 0, 1, 1.1},
+    {"down_front_left", 1.9, 0.75, 0, 0, 0, 1, 1.4}, {"down_front_right", 1.9, -0.75, 0, 0, 0, 1, 1.4},
+    {"down_rear_left", -1.9, 0.75, 0, 0, 0, 1, 1.4}, {"down_rear_right", -1.9, -0.75, 0, 0, 0, 1, 1.4},
     {"rear_main_left_inner", -2.25, 0.2, 0.3, 1, 0, 0, 1.125},
     {"rear_main_left_outer", -2.25, 0.55, 0.3, 1, 0, 0, 1.125},
     {"rear_main_right_inner", -2.25, -0.2, 0.3, 1, 0, 0, 1.125},
@@ -198,14 +264,14 @@ TEST(Allocator, SaturatesWithinBoundsAndScalesWithFeed)
   const double mg = 1800 * 9.81;
   ThrustAllocator a(roadsterNozzles(mg), mg, mg);
   Vec6 w;
-  w << 0, 0, 10.0 * mg, 0, 0, 0;  // more lift than the 4.4 m g the down nozzles have
+  w << 0, 0, 10.0 * mg, 0, 0, 0;  // more lift than the 5.6 m g the down nozzles have
   Vec6 wt;
   wt << 1, 1, 1, 1, 1, 1;
   const auto full = a.solve(w, wt, 1.0, 1e-8);
-  EXPECT_NEAR(full.achieved(2), 4.4 * mg, 1e-2 * mg);
+  EXPECT_NEAR(full.achieved(2), 5.6 * mg, 1e-2 * mg);
   EXPECT_LE(full.u.maxCoeff(), 1.0 + 1e-9);
   const auto half = a.solve(w, wt, 0.5, 1e-8);
-  EXPECT_NEAR(half.achieved(2), 2.2 * mg, 1e-2 * mg);
+  EXPECT_NEAR(half.achieved(2), 2.8 * mg, 1e-2 * mg);
   const auto none = a.solve(w, wt, 0.0, 1e-8);
   EXPECT_DOUBLE_EQ(none.u.norm(), 0.0);
 }

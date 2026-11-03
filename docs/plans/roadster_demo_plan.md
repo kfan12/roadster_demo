@@ -149,7 +149,7 @@ src/
   roadster_description/        BUILT 2026-10-16. Derived from sedan.urdf.xacro: body, 4 effort wheels, 2 position
                                steer joints, 10 nozzle frames, gz_ros2_control block, IMU, 3D truth odometry,
                                F/T sensors on wheel joints, body contact sensor, optional camera (rear door: Phase 2)
-    urdf/roadster.urdf.xacro             args: chassis_mass (1730 -> 1,800 kg total), tire_mu (1.2), with_camera (false)
+    urdf/roadster.urdf.xacro             args: chassis_mass (1590 -> 1,700 kg total), tire_mu (1.2), with_camera (false)
     config/nozzles.yaml                  nozzle layout, read by the xacro and later by the thruster plugin
     config/ros2_controllers.yaml
     config/bridge_roadster.yaml
@@ -337,6 +337,75 @@ Known gaps, not blocking Demo A:
 - No rear nozzle door and no video calibration yet (Phase 8); ramp radius and fan force are assumptions until then. (Plume and fan-exhaust particles have since been added: `with_effects` in the URDF.)
 - The zero-g test failed once in 13 runs, unexplained and not reproduced since; it now refuses to run with another thruster publisher alive.
 
+### Demo A revised to match Tesla's stunt (2026-11-02)
+
+The manoeuvre now follows the unveil footage as the project owner described it, replacing the flat-overhang sequence above.
+
+- **Ramp:** the 8 m arc ends at 170 deg and a 6 m ceiling continues along its tangent, rising 10 deg away from the loop (`--arc-deg 170 --overhang-len 6`, now the generator defaults); its free edge is at 16.9 m.
+  The map's overhang plane is general (any tilt), and the mission's track coordinate runs along it.
+- **Stop on the ramp:** the car stops at 150 deg round the arc (`hold_arc_deg`), 30 deg short of upside down, and holds 1 s.
+  The parking brake was a pure damper, which on a 30 deg slope holds only while creeping (7 cm down the arc in 1 s, tilt_imu1); it now adds the gravity along the track as feed-forward (0.5-0.7 cm of drift).
+- **Drive-off on the tyres alone:** no rear thrust (`drive_off_rear_thrust: false`); the fan's suction is the tyres' grip, traction control runs at its limit over 2.6 m of arc and the ceiling, and the car lets go at 6.4 m/s.
+  A point-mass sizing put 10 deg of tilt, a 6 m ceiling and a 150 deg stop at about 6.4 m/s; a steeper tilt or a later stop leaves too little speed.
+- **Faster flip:** 0.25 s after letting go (was 0.6), a 0.65 s roll (was 0.8), whose minimum-jerk peak is 88% of one bottom pair's roll torque.
+  It saturates briefly in both halves (9 deg peak tracking error), so it is about the fastest this nozzle layout allows.
+  The roll keeps the ceiling's 10 deg pitch, so a 0.4 s levelling follows it.
+  Blended into the roll, the levelling's axis swept round the body and became a body yaw demand, which only the rear nozzles can torque: 16 kN.s of rear thrust, a 16 m/s touchdown and the tank out of regulation (tilt_imu1).
+  In sequence, there is no yaw demand at all.
+- **Free fall, then a much harder burn:** 2.5 g brake and flare (were 1.5 and 2 g), starting about 5 m up; the burn is 0.74 s at up to 3.4 m g of thrust (was 1.06 s).
+  These landing parameters are shared with the drop test and Demo B, both re-validated.
+
+| Run (IMU-flown, all checks PASS) | tilt_imu2 | tilt_imu3 | tilt_drop1 | tilt_hop1 |
+| --- | --- | --- | --- | --- |
+| Release / flip | 6.42 m/s, 180.0 deg | 6.41 m/s, 180.0 deg | 180.0 deg | 360.0 deg, 1.05 m over the Semi |
+| Touchdown | 0.61 m/s, 2.32 g, tilt 0.06 deg, 0.75 m off centre | 0.62 m/s, 2.33 g, 0.74 m off centre | 0.60 m/s, 2.36 g | 0.57 m/s, 2.32 g, 0.97 m off centre |
+| Gas, tank at end | 180 kg, 70.5 kg | 181 kg, 69.1 kg | 172 kg, 78.7 kg | 172 kg, 78.2 kg |
+| Estimate error, max | 4.7 cm, 0.17 deg | 7.4 cm, 0.22 deg | 1.9 cm, 0.22 deg | 10.2 cm, 0.18 deg |
+
+Demo A's gas now fits: 180-181 kg (was 195), with feed at 100% to touchdown, but the tank ends only 1-2 kg above the 68 kg regulation limit.
+Dropping the drive-off thrust saved 10 kN.s and the shorter burn about 10 kN.s, against about 13 kN.s more for the faster flip.
+The analyzer's ramp checks follow the new hold: "reached the ceiling" (arc angle past `arc_deg`), and a steady (< 1 deg), mostly upside-down (> 90 deg from upright) hold in place of within 5 deg of inverted.
+
+#### Harder landing burn (2026-11-02, same day)
+
+The landing now stops the fall violently and then settles, as in the footage.
+- **Bottom nozzles 1.1 -> 1.4 m g each** (5.6 m g in all; an owner decision, the sizes being assumptions): at 1.1 the burn was capped near 2.9 g.
+  They also give the roll 37 kN.m instead of 29, so the 0.65 s flip no longer saturates (32.9 kN.m peak; an 8 deg lag remains, from the valve response).
+- **One hard stage, then a steady settle:** 3.6 g (4.6 m g of the 5.04 usable) to 0.7 m/s at 12 cm above the standing height, then 0.7 m/s onto the wheels (`flare_height: 0`, `touchdown_height: 0.12`).
+  The burn latches at 3.3 m and 13.3 m/s, stops the car in 0.40 s at up to 4.5 m g, and settles for 0.30 s.
+- `brake_kv` 3 -> 10: profile errors grow at a / v_ref, and at 3 /s the 3.6 g stage ran 0.7 m/s under the profile, stopped 0.2 m up, fell and touched down at 0.79 m/s (land_imu2).
+- A zero-deceleration second stage (`flare_accel: 0`) was tried first for the settle; its hand-over from 4.5 m g to 1 m g dipped and surged.
+  The single stage hands over through the existing fall-lag cut of the feed-forward instead.
+- The settle costs gas (it hovers on ~1 m g): 0.45 s took Demo A out of regulation (land_imu1, 187.5 kg), 0.38 s to 98% feed (land_imu3); at 0.3 s it fits.
+
+| Run (IMU-flown, all checks PASS) | land_imu4 | land_imu5 | land_drop1 | land_hop1 |
+| --- | --- | --- | --- | --- |
+| Touchdown | 0.67 m/s, 3.50 g | 0.66 m/s, 3.52 g | 0.66 m/s, 3.50 g | 0.63 m/s, 3.41 g, 1.04 m over the Semi |
+| Gas, tank at end | 179.1 kg, 71.2 kg | 179.2 kg, 71.1 kg | 170.4 kg, 79.9 kg | 169.7 kg, 80.6 kg |
+| Estimate error, max | 6.0 cm, 0.21 deg | 12.1 cm, 0.45 deg | 4.0 cm, 0.25 deg | 4.0 cm, 0.23 deg |
+
+#### Visible landing hover (2026-11-03)
+
+The 0.3 s settle at 12 cm read as a brief stall rather than a hover, so it is now raised and lengthened (an owner decision).
+- **Settle 0.12 m at 0.7 m/s -> 0.30 m at 0.75 m/s** (`touchdown_height`, `touchdown_speed`): the hard stop ends at 0.33 m and the car hangs there for 0.46 s before the wheels touch.
+- The hover holds about 1 m g, about 50 kg of gas a second at 350 m/s exhaust speed, and Demo A had only 3 kg to spare: at 1,800 kg it used 186 kg and the tank left regulation in the landing burn (feed 95%, mass_imu1).
+  A 10% larger tank paid for it (hover_imu1), but was reverted: the tank stays at the reported 600 L.
+- **The sim car was 1,840 kg, not 1,800:** when the suspension links were added, the xacro's `chassis_mass` default went 1730 -> 1690, but `roadster_sim.launch.py` still passed 1730.
+  Every run since flew 40 kg heavier than the controller's model (the URDF sums to 1,840.01 kg, and the steady settle in hover_imu1 held 1,839 kg of weight).
+  The launch default now equals the xacro default.
+- **Mass 1,800 -> 1,700 kg:** the second-generation Roadster's published target curb weight is "under 1,700 kg" (a target, not a spec); 1,800 kg was an assumption from before anything was published (an owner decision).
+  `chassis_mass` 1590; `stunt_params.yaml` mass 1700.01, COM x 0.0079 m, inertia [566.8, 2950.6, 3386.7] kg.m^2 (`rigid_body()` on the expanded URDF).
+  The nozzles and fans are sized in m g, so the forces scale with the mass and the gas with it; the rear four now give 75 kN at full thrust, a little under the reported "over 80 kN".
+  The stunt car also carries the 250 kg tank, fans and nozzles, so a showroom curb weight probably understates it.
+- Demo C is unchanged in time (thrust and tyre force both scale with m): 0-60 mph in 0.815 s over 10.8 m.
+
+| Run (IMU-flown, all checks PASS, 1,700 kg, 600 L) | m1700_imu1 | m1700_drop1 | m1700_hop1 | m1700_launch1 |
+| --- | --- | --- | --- | --- |
+| Hover | 0.33 m, 0.50 s | 0.32 m, 0.48 s | 0.31 m, 0.46 s | - |
+| Touchdown | 0.74 m/s, 2.06 g | 0.74 m/s, 3.11 g | 0.75 m/s, 3.32 g, 1.07 m over the Semi | 0-60 mph 0.815 s |
+| Gas, tank at end | 175.9 kg, 74.4 kg | 168.1 kg, 82.2 kg | 169.6 kg, 80.7 kg | 101.5 kg, 148.8 kg |
+| Estimate error, max | 8.4 cm, 0.12 deg | 5.4 cm, 0.30 deg | 11.5 cm, 0.14 deg | 4.4 cm, 0.17 deg |
+
 ### Demo C status (2026-10-17): done in simulation (Phase 3)
 
 World `roadster_launch` (generator `--kind launch`: a straight runway, a mark every 10 m), mission mode `launch`, `ros2 launch roadster_control demo_c.launch.py`; scored with `scripts/run_stunt_scenario.sh roadster_launch launch`.
@@ -409,7 +478,7 @@ Every entry carries `value`, `source` and `confidence` fields in the YAML; the t
 
 | Parameter | Value | Basis |
 | --- | --- | --- |
-| mass | 1,800 kg | Assumption; demo cars may be stripped shells (PDF), so calibrate in Phase 3 |
+| mass | 1,700 kg | The published target curb weight ("under 1,700 kg"; 1,800 kg assumed until 2026-11-03); the stunt car's tank, fans and nozzles may add to it |
 | body L x W x H | 4.4 x 1.95 x 1.15 m | Assumption, not published |
 | COM | 0.15 m behind wheelbase center, 0.45 m above ground | Assumption, low and slightly rearward per PDF |
 | wheelbase, track, wheel radius | 2.6 m, 1.65 m, 0.34 m | Assumption |

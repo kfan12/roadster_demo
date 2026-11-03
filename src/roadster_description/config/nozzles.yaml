@@ -14,15 +14,19 @@
 #   force_dir   unit direction of the force ON THE CAR (opposite the exhaust)
 #   f_max_mg    max thrust at the reference feed pressure, as a multiple of the
 #               model's total weight m*g, so the layout scales with mass
-#               (rear four 4 x 1.125 = 4.5 m g ~ "over 80 kN" at 1,800 kg).
+#               (rear four 4 x 1.125 = 4.5 m g: 79 kN at 1,800 kg, 75 kN at the 1,700 kg
+#               model, a little under the reported "over 80 kN").
 #
 # Thruster groups (four rear, four bottom, two side: the grouping as the project
 # owner described the car, 2026-10-17, not checked against a public source;
 # positions and sizes are ours):
-#   rear_main_*  four facing backward: the launch off the overhang. The prefix
-#                is how the mission finds them for the drive-off thrust assist.
-#   down_*       four bottom corners pushing up (body +z): lift, landing burn,
-#                and the kick flip's roll torque (one side's pair).
+#   rear_main_*  four facing backward: Demo C's launch (and the optional
+#                drive-off assist off the ramp). The prefix is how the
+#                mission finds them.
+#   down_*       four bottom corners pushing up (body +z), 4 x 1.4 = 5.6 m g:
+#                lift, the hard landing burn and the kick flip's roll torque
+#                (one side's pair). Sized 2026-11-02 for a 3.6 g landing burn
+#                with control margin; at 4 x 1.1 braking was capped near 2.9 g.
 #   side_*       one exhausting to each side, at the COM (x = 0, z = 0) so it
 #                gives a pure lateral force with no roll or yaw torque.
 # With no roof nozzles there is no force-free roll couple: rolling on one
@@ -37,9 +41,9 @@ nozzles:
   rear_main_left_inner:  {xyz: [-2.25,  0.20, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
   rear_main_right_inner: {xyz: [-2.25, -0.20, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
   rear_main_right_outer: {xyz: [-2.25, -0.55, 0.30], force_dir: [1, 0, 0],  f_max_mg: 1.125}
-  down_front_left:  {xyz: [ 1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
-  down_front_right: {xyz: [ 1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
-  down_rear_left:   {xyz: [-1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
-  down_rear_right:  {xyz: [-1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.10}
+  down_front_left:  {xyz: [ 1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.40}
+  down_front_right: {xyz: [ 1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.40}
+  down_rear_left:   {xyz: [-1.90,  0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.40}
+  down_rear_right:  {xyz: [-1.90, -0.75, 0.00], force_dir: [0, 0, 1],  f_max_mg: 1.40}
   side_left:        {xyz: [ 0.00,  0.90, 0.00], force_dir: [0, -1, 0], f_max_mg: 0.50}
   side_right:       {xyz: [ 0.00, -0.90, 0.00], force_dir: [0, 1, 0],  f_max_mg: 0.50}

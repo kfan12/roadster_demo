@@ -5,9 +5,10 @@
   ros2 launch roadster_control demo_a.launch.py state:=truth        # fly on Gazebo truth
   ros2 launch roadster_control demo_a.launch.py release_after_hold:=false   # climb and stay held
 
-Run-in, up the 8 m loop on fan suction, stop upside down on the overhang,
-hold, drive off it still inverted, kick-flip 180 deg on the cold-gas
-nozzles, landing burn and flare, land on the wheels.
+Run-in, up the 8 m loop on fan suction, stop on its upper arc (mostly
+upside down), hold, drive on the tyres alone up onto the ceiling (tilted
+10 deg upward) and off its end, a quick 180 deg kick flip on the cold-gas
+nozzles, free fall, a hard 2.5 g landing burn, land on the wheels.
 
 Every stunt_demo.launch.py argument (gui, rviz, state, onboard_camera,
 unpause_after, start_delay) passes through. Generate the world first if it
